@@ -67,6 +67,11 @@ local function PlayDjLust()
             printDebug("Failed to play music file: ", MUSIC_FILE)
         end
     end
+    
+    -- Start animation if available
+    if addon.StartAnimation then
+        addon:StartAnimation()
+    end
 end
 
 -- Stop bloodlust music
@@ -76,6 +81,11 @@ local function StopDjLust()
         musicHandle = nil
     end
     printDebug("Music stopped - Bloodlust ended")
+    
+    -- Stop animation if available
+    if addon.StopAnimation then
+        addon:StopAnimation()
+    end
 end
 
 -- Check for sudden haste increase
@@ -154,34 +164,35 @@ SLASH_DJLUST1 = "/djl"
 SLASH_DJLUST2 = "/djlust"
 SlashCmdList["DJLUST"] = function(msg)
     if msg == "test" then
-        print("[DjLust] [TEST] Testing music playback...")
+        print("|cff00bfff[DjLust]|r |cffff8800Testing music playback...|r")
         PlayDjLust()
     elseif msg == "stop" then
-        print("[DjLust] [STOP] Stopping music...")
+        print("|cff00bfff[DjLust]|r |cffff8800Stopping music...|r")
         StopDjLust()
         isLusted = false
     elseif msg == "status" then
-        print("[DjLust] [STATUS]:")
-        print("  Bloodlusted:", isLusted and "YES" or "NO")
-        print("  In combat:", InCombatLockdown() and "YES" or "NO")
-        print(string.format("  Baseline haste: %.1f%%", baselineHaste or 0))
-        print(string.format("  Current haste: %.1f%%", GetCurrentHaste()))
+        print("|cff00bfff[DjLust] Status:|r")
+        print("  |cff00ff00Bloodlusted:|r", isLusted and "|cff00ff00YES|r" or "|cffff0000NO|r")
+        print("  |cff00ff00In Combat:|r", InCombatLockdown() and "|cff00ff00YES|r" or "|cffff0000NO|r")
+        print(string.format("  |cff00ff00Baseline Haste:|r |cffffffff%.1f%%|r", baselineHaste or 0))
+        print(string.format("  |cff00ff00Current Haste:|r |cffffffff%.1f%%|r", GetCurrentHaste()))
         local diff = baselineHaste and (GetCurrentHaste() - baselineHaste) or 0
-        print(string.format("  Haste difference: %.1f%%", diff))
+        local diffColor = diff >= HASTE_THRESHOLD * 100 and "|cff00ff00" or "|cffffffff"
+        print(string.format("  |cff00ff00Haste Difference:|r %s%.1f%%|r", diffColor, diff))
     elseif msg == "reset" then
-        print("[DjLust] [RESET] Resetting detection...")
+        print("|cff00bfff[DjLust]|r |cffff8800Resetting detection...|r")
         baselineHaste = GetCurrentHaste()
         isLusted = false
         StopDjLust()
     elseif msg == "config" then
-        print("[DjLust] [CONFIG]\nConfiguration:")
-        print("  Music file:", type(MUSIC_FILE) == "number" and ("Sound ID: " .. MUSIC_FILE) or MUSIC_FILE)
-        print("  Haste threshold:", (HASTE_THRESHOLD * 100) .. "%")
-        print("  Check interval:", CHECK_INTERVAL .. "s")
-        print("\nTo use custom music:")
-        print("1. Put your MP3 in: Interface/AddOns/DjLust/")
-        print("2. Edit DjLust.lua and change MUSIC_FILE to:")
-        print('   "Interface\\\\AddOns\\\\DjLust\\\\Music.mp3"')
+        print("|cff00bfff[DjLust] Configuration:|r")
+        print("  |cff00ff00Music File:|r |cffffffff" .. (type(MUSIC_FILE) == "number" and ("Sound ID: " .. MUSIC_FILE) or MUSIC_FILE) .. "|r")
+        print("  |cff00ff00Haste Threshold:|r |cffffffff" .. (HASTE_THRESHOLD * 100) .. "%|r")
+        print("  |cff00ff00Check Interval:|r |cffffffff" .. CHECK_INTERVAL .. "s|r")
+        print("\n|cff00ff00To use custom music:|r")
+        print("  |cffffffff1. Put your MP3 in:|r |cffff8800Interface/AddOns/DjLust/|r")
+        print("  |cffffffff2. Edit DjLust.lua and change MUSIC_FILE to:|r")
+        print('     |cffff8800"Interface\\\\AddOns\\\\DjLust\\\\Music.mp3"|r')
     elseif msg:match("^debug") then
         local arg = msg:match("^debug%s*(%S*)")
 
@@ -191,21 +202,23 @@ SlashCmdList["DJLUST"] = function(msg)
             SetDebug(false)
         else
             print("|cff00bfff[DjLust]|r Usage:")
-            print("  /djlust debug on  - Enable debug output")
-            print("  /djlust debug off - Disable debug output")
+            print("  |cffff8800/djlust debug on|r  - Enable debug output")
+            print("  |cffff8800/djlust debug off|r - Disable debug output")
         end
 
     else
         print("|cff00bfff[DjLust] [HELP]\nAvailable Commands:|r")
+        print("  |cffff8800/djlust settings|r - Open settings panel")
         print("  |cffff8800/djlust status|r - Show current status")
-        print("  |cffff8800/djlust test|r - Test music playback for .mp3 @ ", MUSIC_FILE)
+        print("  |cffff8800/djlust test|r - Test music playback")
         print("  |cffff8800/djlust stop|r - Stop music")
         print("  |cffff8800/djlust reset|r - Reset detection")
-        print("  |cffff8800/djlust config|r - Show configuration")
-        print("  |cffff8800/djlust debug on|r  - Enable debug output")
-        print("  |cffff8800/djlust debug off|r - Disable debug output")
-        print("|cff00bfff[TIP]|r |cffff8800/djl|r can be used as shortcut/alias of |cffff8800/djlust|r")
+        print("  |cffff8800/djlust minimap|r - Toggle minimap button")
+        print("  |cffff8800/djlust debug on/off|r - Toggle debug output")
+        print("|cff00bfff[TIP]|r |cffff8800/djl|r can be used as a shortcut!")
+        print("|cff00bfff[TIP]|r Right-click the minimap button for quick menu!")
     end
 end
 
-print("|cff00bfff[DjLust]|r Type |cffff8800/djlust|r for all available commands.")
+-- Welcome message on load
+print("|cff00bfff[DjLust]|r Loaded! Type |cffff8800/djlust settings|r to configure or |cffff8800/djlust|r for commands.")
