@@ -1,9 +1,14 @@
-## Interface: 120000
+## Interface: 120000, 120001
 ## Version: 0.1.0
 ## Title: DjLust
-## Notes: Plays music and shows animation when Bloodlust and other similar spells are detected!
+## Notes: Play music and display animations when Bloodlust and other similar spells are detected!
 ## Author: Jeremy-Gstein
 ## SavedVariables: DjLustDB
+
+
+## X-License: Licensed under the MIT License. See the LICENSE file in the project root for details.
+## X-Website: https://github.com/Jeremy-Gstein/DjLust
+## X-Curse-Project-ID: 1049985
 
 DjLust.lua
 Animation.lua
