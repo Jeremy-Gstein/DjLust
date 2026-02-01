@@ -9,6 +9,8 @@ DjLustDB = DjLustDB or {
     animationSize = 128,
     animationFPS = 8,
     debugMode = false,
+    volume = 1.0, -- Volume level (0.0 to 1.0)
+    theme = "chipi", -- Selected theme: "chipi" or "alternative"
 }
 
 local settingsFrame
@@ -19,8 +21,9 @@ local settingsFrame
 local function CreateSettingsWindow()
     if settingsFrame then return settingsFrame end
     
-    local WIDTH, HEIGHT = 450, 450
+    local WIDTH, HEIGHT = 450, 550
     
+    -- Main frame (container)
     local f = CreateFrame("Frame", "DjLustSettingsFrame", UIParent, "BackdropTemplate")
     f:SetSize(WIDTH, HEIGHT)
     f:SetPoint("CENTER")
@@ -54,12 +57,31 @@ local function CreateSettingsWindow()
     local close = CreateFrame("Button", nil, f, "UIPanelCloseButton")
     close:SetPoint("TOPRIGHT", -8, -8)
     
-    local yOffset = -50
+    -- Create ScrollFrame
+    local scrollFrame = CreateFrame("ScrollFrame", nil, f, "UIPanelScrollFrameTemplate")
+    scrollFrame:SetPoint("TOPLEFT", 10, -45)
+    scrollFrame:SetPoint("BOTTOMRIGHT", -30, 50)
+    
+    -- Enable mouse wheel scrolling
+    scrollFrame:EnableMouseWheel(true)
+    scrollFrame:SetScript("OnMouseWheel", function(self, delta)
+        local current = self:GetVerticalScroll()
+        local maxScroll = self:GetVerticalScrollRange()
+        local newScroll = math.max(0, math.min(maxScroll, current - (delta * 20)))
+        self:SetVerticalScroll(newScroll)
+    end)
+    
+    -- Create content frame (child of scroll frame)
+    local content = CreateFrame("Frame", nil, scrollFrame)
+    content:SetSize(WIDTH - 50, 700) -- Tall enough for all content
+    scrollFrame:SetScrollChild(content)
+    
+    local yOffset = -10
     
     --------------------------------------------------
     -- Animation Section Header
     --------------------------------------------------
-    local animHeader = f:CreateFontString(nil, "OVERLAY", "GameFontNormalLarge")
+    local animHeader = content:CreateFontString(nil, "OVERLAY", "GameFontNormalLarge")
     animHeader:SetPoint("TOPLEFT", 20, yOffset)
     animHeader:SetText("|cffff8800Animation Settings|r")
     yOffset = yOffset - 30
@@ -67,7 +89,7 @@ local function CreateSettingsWindow()
     --------------------------------------------------
     -- Enable Animation Checkbox
     --------------------------------------------------
-    local enableAnim = CreateFrame("CheckButton", nil, f, "UICheckButtonTemplate")
+    local enableAnim = CreateFrame("CheckButton", nil, content, "UICheckButtonTemplate")
     enableAnim:SetPoint("TOPLEFT", 25, yOffset)
     enableAnim.text:SetText("Enable Animation")
     enableAnim:SetChecked(DjLustDB.animationEnabled)
@@ -80,12 +102,12 @@ local function CreateSettingsWindow()
     --------------------------------------------------
     -- Animation Size Slider
     --------------------------------------------------
-    local sizeLabel = f:CreateFontString(nil, "OVERLAY", "GameFontNormal")
+    local sizeLabel = content:CreateFontString(nil, "OVERLAY", "GameFontNormal")
     sizeLabel:SetPoint("TOPLEFT", 25, yOffset)
     sizeLabel:SetText("Animation Size: " .. DjLustDB.animationSize .. " px")
     yOffset = yOffset - 25
     
-    local sizeSlider = CreateFrame("Slider", nil, f, "OptionsSliderTemplate")
+    local sizeSlider = CreateFrame("Slider", nil, content, "OptionsSliderTemplate")
     sizeSlider:SetPoint("TOPLEFT", 25, yOffset)
     sizeSlider:SetWidth(380)
     sizeSlider:SetMinMaxValues(32, 512)
@@ -107,12 +129,12 @@ local function CreateSettingsWindow()
     --------------------------------------------------
     -- Animation FPS Slider
     --------------------------------------------------
-    local fpsLabel = f:CreateFontString(nil, "OVERLAY", "GameFontNormal")
+    local fpsLabel = content:CreateFontString(nil, "OVERLAY", "GameFontNormal")
     fpsLabel:SetPoint("TOPLEFT", 25, yOffset)
     fpsLabel:SetText("Animation Speed: " .. DjLustDB.animationFPS .. " FPS")
     yOffset = yOffset - 25
     
-    local fpsSlider = CreateFrame("Slider", nil, f, "OptionsSliderTemplate")
+    local fpsSlider = CreateFrame("Slider", nil, content, "OptionsSliderTemplate")
     fpsSlider:SetPoint("TOPLEFT", 25, yOffset)
     fpsSlider:SetWidth(380)
     fpsSlider:SetMinMaxValues(1, 30)
@@ -131,9 +153,86 @@ local function CreateSettingsWindow()
     yOffset = yOffset - 40
     
     --------------------------------------------------
+    -- Audio Section Header
+    --------------------------------------------------
+    local audioHeader = content:CreateFontString(nil, "OVERLAY", "GameFontNormalLarge")
+    audioHeader:SetPoint("TOPLEFT", 20, yOffset)
+    audioHeader:SetText("|cffff8800Audio Settings|r")
+    yOffset = yOffset - 30
+    
+    --------------------------------------------------
+    -- Theme Selection
+    --------------------------------------------------
+    local themeLabel = content:CreateFontString(nil, "OVERLAY", "GameFontNormal")
+    themeLabel:SetPoint("TOPLEFT", 25, yOffset)
+    themeLabel:SetText("Theme Selection:")
+    yOffset = yOffset - 25
+    
+    -- Chipi Theme Radio Button
+    local chipiRadio = CreateFrame("CheckButton", nil, content, "UIRadioButtonTemplate")
+    chipiRadio:SetPoint("TOPLEFT", 35, yOffset)
+    chipiRadio.text:SetText("Chipi Chipi (Default)")
+    chipiRadio:SetChecked(DjLustDB.theme == "chipi")
+    chipiRadio:SetScript("OnClick", function(self)
+        DjLustDB.theme = "chipi"
+        chipiRadio:SetChecked(true)
+        pedroRadio:SetChecked(false)
+        if addon.UpdateTheme then
+            addon:UpdateTheme("chipi")
+        end
+        print("|cff00bfff[DjLust]|r Theme changed to: |cffff1493Chipi Chipi|r")
+    end)
+    
+    -- Pedro Theme Radio Button
+    local pedroRadio = CreateFrame("CheckButton", nil, content, "UIRadioButtonTemplate")
+    pedroRadio:SetPoint("TOPLEFT", 225, yOffset)
+    pedroRadio.text:SetText("Pedro Theme")
+    pedroRadio:SetChecked(DjLustDB.theme == "pedro")
+    pedroRadio:SetScript("OnClick", function(self)
+        DjLustDB.theme = "pedro"
+        chipiRadio:SetChecked(false)
+        pedroRadio:SetChecked(true)
+        if addon.UpdateTheme then
+            addon:UpdateTheme("pedro")
+        end
+        print("|cff00bfff[DjLust]|r Theme changed to: |cff00ff00Pedro|r")
+    end)
+    
+    yOffset = yOffset - 30
+    
+    --------------------------------------------------
+    -- Volume Slider
+    --------------------------------------------------
+    -- Ensure volume is initialized
+    DjLustDB.volume = DjLustDB.volume or 1.0
+    
+    local volumeLabel = content:CreateFontString(nil, "OVERLAY", "GameFontNormal")
+    volumeLabel:SetPoint("TOPLEFT", 25, yOffset)
+    volumeLabel:SetText("Music Volume: " .. math.floor(DjLustDB.volume * 100) .. "%")
+    yOffset = yOffset - 25
+    
+    local volumeSlider = CreateFrame("Slider", nil, content, "OptionsSliderTemplate")
+    volumeSlider:SetPoint("TOPLEFT", 25, yOffset)
+    volumeSlider:SetWidth(380)
+    volumeSlider:SetMinMaxValues(0, 1)
+    volumeSlider:SetValue(DjLustDB.volume)
+    volumeSlider:SetValueStep(0.05)
+    volumeSlider:SetObeyStepOnDrag(true)
+    volumeSlider.Low:SetText("0%")
+    volumeSlider.High:SetText("100%")
+    volumeSlider:SetScript("OnValueChanged", function(self, value)
+        DjLustDB.volume = value
+        volumeLabel:SetText("Music Volume: " .. math.floor(value * 100) .. "%")
+        if addon.UpdateVolume then
+            addon:UpdateVolume(value)
+        end
+    end)
+    yOffset = yOffset - 35
+    
+    --------------------------------------------------
     -- Detection Section Header
     --------------------------------------------------
-    local detectHeader = f:CreateFontString(nil, "OVERLAY", "GameFontNormalLarge")
+    local detectHeader = content:CreateFontString(nil, "OVERLAY", "GameFontNormalLarge")
     detectHeader:SetPoint("TOPLEFT", 20, yOffset)
     detectHeader:SetText("|cffff8800Detection Settings|r")
     yOffset = yOffset - 35
@@ -141,7 +240,7 @@ local function CreateSettingsWindow()
     --------------------------------------------------
     -- Debug Mode Checkbox
     --------------------------------------------------
-    local debugCheck = CreateFrame("CheckButton", nil, f, "UICheckButtonTemplate")
+    local debugCheck = CreateFrame("CheckButton", nil, content, "UICheckButtonTemplate")
     debugCheck:SetPoint("TOPLEFT", 25, yOffset)
     debugCheck.text:SetText("Debug Mode")
     debugCheck:SetChecked(DjLustDB.debugMode)
@@ -149,12 +248,12 @@ local function CreateSettingsWindow()
         DjLustDB.debugMode = self:GetChecked()
         SlashCmdList["DJLUST"]("debug " .. (DjLustDB.debugMode and "on" or "off"))
     end)
-    yOffset = yOffset - 40
+    yOffset = yOffset - 35
     
     --------------------------------------------------
     -- Quick Actions Section
     --------------------------------------------------
-    local actionHeader = f:CreateFontString(nil, "OVERLAY", "GameFontNormalLarge")
+    local actionHeader = content:CreateFontString(nil, "OVERLAY", "GameFontNormalLarge")
     actionHeader:SetPoint("TOPLEFT", 20, yOffset)
     actionHeader:SetText("|cffff8800Quick Actions|r")
     yOffset = yOffset - 30
@@ -170,24 +269,24 @@ local function CreateSettingsWindow()
     end
     
     -- Test Music Button
-    CreateActionButton(f, 25, yOffset, 120, "Test Music", function()
+    CreateActionButton(content, 25, yOffset, 120, "Test Music", function()
         SlashCmdList["DJLUST"]("test")
     end)
     
     -- Stop Music Button
-    CreateActionButton(f, 155, yOffset, 120, "Stop Music", function()
+    CreateActionButton(content, 155, yOffset, 120, "Stop Music", function()
         SlashCmdList["DJLUST"]("stop")
     end)
     
     -- Toggle Animation Button
-    CreateActionButton(f, 285, yOffset, 120, "Toggle Animation", function()
+    CreateActionButton(content, 285, yOffset, 120, "Toggle Animation", function()
         SlashCmdList["DJLANIM"]("toggle")
     end)
     
     yOffset = yOffset - 35
     
     -- Reset Position Button
-    CreateActionButton(f, 25, yOffset, 190, "Reset Animation Position", function()
+    CreateActionButton(content, 25, yOffset, 190, "Reset Animation Position", function()
         if _G["DjLustAnimFrame"] then
             _G["DjLustAnimFrame"]:ClearAllPoints()
             _G["DjLustAnimFrame"]:SetPoint("CENTER", UIParent, "CENTER", 0, 0)
@@ -196,7 +295,7 @@ local function CreateSettingsWindow()
     end)
     
     -- Reset Detection Button
-    CreateActionButton(f, 225, yOffset, 180, "Reset Detection", function()
+    CreateActionButton(content, 225, yOffset, 180, "Reset Detection", function()
         SlashCmdList["DJLUST"]("reset")
     end)
     
@@ -242,6 +341,10 @@ local frame = CreateFrame("Frame")
 frame:RegisterEvent("ADDON_LOADED")
 frame:SetScript("OnEvent", function(self, event, loadedAddon)
     if loadedAddon == addonName then
+        -- Ensure all settings have default values
+        DjLustDB.volume = DjLustDB.volume or 1.0
+        DjLustDB.theme = DjLustDB.theme or "chipi"
+        
         -- Apply saved settings
         if DjLustDB.debugMode then
             C_Timer.After(0.1, function()

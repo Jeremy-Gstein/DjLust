@@ -16,7 +16,7 @@ addon_name := "DjLust"
 retail_path := "/home/jg/Games/battlenet/drive_c/Program Files (x86)/World of Warcraft/_retail_/Interface/AddOns"
 beta_path := "/home/jg/Games/battlenet/drive_c/Program Files (x86)/World of Warcraft/_beta_/Interface/AddOns"
 # ADDON FILES (.lua .toc etc..)
-files := "DjLust.lua DjLust.toc Music.mp3"
+files := "*.lua DjLust.toc *.tga *.mp3"
 
 # just list available commands B)
 _default:
