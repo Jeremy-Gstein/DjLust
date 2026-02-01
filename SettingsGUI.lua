@@ -230,27 +230,6 @@ local function CreateSettingsWindow()
     yOffset = yOffset - 35
     
     --------------------------------------------------
-    -- Detection Section Header
-    --------------------------------------------------
-    local detectHeader = content:CreateFontString(nil, "OVERLAY", "GameFontNormalLarge")
-    detectHeader:SetPoint("TOPLEFT", 20, yOffset)
-    detectHeader:SetText("|cffff8800Detection Settings|r")
-    yOffset = yOffset - 35
-    
-    --------------------------------------------------
-    -- Debug Mode Checkbox
-    --------------------------------------------------
-    local debugCheck = CreateFrame("CheckButton", nil, content, "UICheckButtonTemplate")
-    debugCheck:SetPoint("TOPLEFT", 25, yOffset)
-    debugCheck.text:SetText("Debug Mode")
-    debugCheck:SetChecked(DjLustDB.debugMode)
-    debugCheck:SetScript("OnClick", function(self)
-        DjLustDB.debugMode = self:GetChecked()
-        SlashCmdList["DJLUST"]("debug " .. (DjLustDB.debugMode and "on" or "off"))
-    end)
-    yOffset = yOffset - 35
-    
-    --------------------------------------------------
     -- Quick Actions Section
     --------------------------------------------------
     local actionHeader = content:CreateFontString(nil, "OVERLAY", "GameFontNormalLarge")
@@ -298,6 +277,29 @@ local function CreateSettingsWindow()
     CreateActionButton(content, 225, yOffset, 180, "Reset Detection", function()
         SlashCmdList["DJLUST"]("reset")
     end)
+
+    yOffset = yOffset - 35
+    
+    --------------------------------------------------
+    -- Detection Section Header
+    --------------------------------------------------
+    local detectHeader = content:CreateFontString(nil, "OVERLAY", "GameFontNormalLarge")
+    detectHeader:SetPoint("TOPLEFT", 20, yOffset)
+    detectHeader:SetText("|cffff8800Enable Debug Mode|r")
+    yOffset = yOffset - 35
+    
+    --------------------------------------------------
+    -- Debug Mode Checkbox
+    --------------------------------------------------
+    local debugCheck = CreateFrame("CheckButton", nil, content, "UICheckButtonTemplate")
+    debugCheck:SetPoint("TOPLEFT", 25, yOffset)
+    debugCheck.text:SetText("Debug Mode")
+    debugCheck:SetChecked(DjLustDB.debugMode)
+    debugCheck:SetScript("OnClick", function(self)
+        DjLustDB.debugMode = self:GetChecked()
+        SlashCmdList["DJLUST"]("debug " .. (DjLustDB.debugMode and "on" or "off"))
+    end)
+
     
     --------------------------------------------------
     -- Info Footer

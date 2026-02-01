@@ -1,5 +1,6 @@
 -- DjLust: Production version with music!
 -- Detects Bloodlust (and similar spells) via haste changes and plays music
+-- MEMORY LEAK FIXED VERSION - Aggressive cleanup
 
 local addonName, addon = ...
 
@@ -26,12 +27,22 @@ local THEMES = {
 local isLusted = false
 local baselineHaste = nil
 local hasteCheckTimer = nil
-local musicHandle = nil
 local debugAddon = false
+local bloodlustCooldown = 0
+
+-- Sound handle management (MEMORY LEAK FIX)
+local soundHandlePool = {}
+local lastPlayTime = 0
+local PLAY_COOLDOWN = 0.5  -- Prevent rapid-fire plays
+
+-- CVar caching (MEMORY LEAK FIX)
+local originalDialogVolume = nil
+local cvarDirty = false
 
 -- Configuration
-local HASTE_THRESHOLD = 0.25 -- Detect increases of 25%+ (bloodlust is 30%)
-local CHECK_INTERVAL = 0.3   -- Check every 0.3 seconds
+local HASTE_THRESHOLD = 0.25
+local CHECK_INTERVAL = 0.5
+local BLOODLUST_COOLDOWN = 30
 
 -- Get current theme's music file
 local function GetMusicFile()
@@ -39,11 +50,9 @@ local function GetMusicFile()
     return theme.music
 end
 
--- DEBUGGING PRINT (disabled in prod)
--- Debug print helper (orange color)
+-- Debug print helper
 function printDebug(...)
-  if not debugAddon then return end
-
+    if not debugAddon then return end
     local prefix = "|cff00bfff[DjLust]|r |cffff8800[DEBUG]|r"
     print(prefix, ...)
 end
@@ -56,7 +65,6 @@ local function SetDebug(enabled)
     ))
 end
 
-
 -- Event frame
 local frame = CreateFrame("Frame")
 
@@ -65,66 +73,95 @@ local function GetCurrentHaste()
     return GetHaste() or 0
 end
 
--- Track original volume for restoration
-local originalDialogVolume = nil
-
--- Play bloodlust music
-local function PlayDjLust()
-    -- Stop any currently playing music
-    StopMusic()
+-- MEMORY LEAK FIX: Cleanup all sound handles
+local function CleanupSoundHandles()
+    for i = #soundHandlePool, 1, -1 do
+        local handle = soundHandlePool[i]
+        if handle then
+            StopSound(handle)
+        end
+        soundHandlePool[i] = nil
+    end
     
-    -- Get volume from settings (default to 1.0 if not set)
+    -- Force table cleanup
+    wipe(soundHandlePool)
+end
+
+-- MEMORY LEAK FIX: Restore CVar only when needed
+local function RestoreDialogVolume()
+    if cvarDirty and originalDialogVolume then
+        SetCVar("Sound_DialogVolume", tostring(originalDialogVolume))
+        cvarDirty = false
+        originalDialogVolume = nil
+        printDebug("Dialog volume restored")
+    end
+end
+
+-- Play bloodlust music (WITH MEMORY LEAK FIXES)
+local function PlayDjLust()
+    -- DEBOUNCE: Prevent rapid-fire calls
+    local now = GetTime()
+    if now - lastPlayTime < PLAY_COOLDOWN then
+        printDebug("Music play blocked - cooldown active (", string.format("%.1f", PLAY_COOLDOWN - (now - lastPlayTime)), "s remaining)")
+        return
+    end
+    lastPlayTime = now
+    
+    -- Stop any currently playing music and cleanup handles
+    StopMusic()
+    CleanupSoundHandles()
+    
+    -- Get volume from settings
     local volume = (DjLustDB and DjLustDB.volume) or 1.0
     
     -- Get music file from current theme
     local musicFile = GetMusicFile()
     
-    -- Play the sound effect (or music file if you specify a path)
+    -- Play the sound
     if type(musicFile) == "number" then
-        -- Using sound kit ID
         PlaySound(musicFile, "Dialog")
         printDebug("Playing default sound!")
     else
-        -- Save original Dialog volume
-        originalDialogVolume = tonumber(GetCVar("Sound_DialogVolume")) or 1.0
+        -- Cache original volume only once
+        if not originalDialogVolume then
+            originalDialogVolume = tonumber(GetCVar("Sound_DialogVolume")) or 1.0
+        end
         
-        -- Set Dialog volume to our desired level
-        SetCVar("Sound_DialogVolume", tostring(volume))
+        -- Only set CVar if it's actually different (reduce CVar spam)
+        local targetVolume = tostring(volume)
+        local currentVolume = GetCVar("Sound_DialogVolume")
+        if currentVolume ~= targetVolume then
+            SetCVar("Sound_DialogVolume", targetVolume)
+            cvarDirty = true
+        end
         
-        -- Play the music file on Dialog channel
+        -- Play the music file
         local willPlay, soundHandle = PlaySoundFile(musicFile, "Dialog")
         if willPlay then
-            musicHandle = soundHandle
-            local themeName = THEMES[DjLustDB.theme] and THEMES[DjLustDB.theme].name or "Unknown"
-            printDebug("Now playing: ", themeName, " at volume ", math.floor(volume * 100), "% (Dialog channel)")
+            -- Store in pool (max 1 handle)
+            soundHandlePool[1] = soundHandle
             
-            -- Trigger animation update
+            local themeName = THEMES[DjLustDB.theme] and THEMES[DjLustDB.theme].name or "Unknown"
+            printDebug("Now playing: ", themeName, " at volume ", math.floor(volume * 100), "%")
+            
+            -- Trigger animation
             if addon.StartAnimation then
                 addon:StartAnimation()
             end
         else
             printDebug("Failed to play music file: ", musicFile)
-            -- Restore volume if playback failed
-            if originalDialogVolume then
-                SetCVar("Sound_DialogVolume", tostring(originalDialogVolume))
-                originalDialogVolume = nil
-            end
+            RestoreDialogVolume()
         end
     end
 end
 
--- Stop bloodlust music
+-- Stop bloodlust music (WITH MEMORY LEAK FIXES)
 local function StopDjLust()
-    if musicHandle then
-        StopSound(musicHandle)
-        musicHandle = nil
-    end
+    -- Stop and cleanup all sound handles
+    CleanupSoundHandles()
     
-    -- Restore original Dialog volume
-    if originalDialogVolume then
-        SetCVar("Sound_DialogVolume", tostring(originalDialogVolume))
-        originalDialogVolume = nil
-    end
+    -- Restore volume
+    RestoreDialogVolume()
     
     -- Stop animation
     if addon.StopAnimation then
@@ -136,20 +173,19 @@ end
 
 -- Update volume for currently playing music
 function addon:UpdateVolume(volume)
-    if musicHandle then
-        -- Update the Dialog volume while music is playing
+    if soundHandlePool[1] and originalDialogVolume then
         SetCVar("Sound_DialogVolume", tostring(volume))
+        cvarDirty = true
         printDebug("Volume updated to ", math.floor(volume * 100), "%")
     end
 end
 
--- Update theme (will apply on next Bloodlust)
+-- Update theme
 function addon:UpdateTheme(theme)
     if THEMES[theme] then
         DjLustDB.theme = theme
         printDebug("Theme updated to: ", THEMES[theme].name)
         
-        -- If animation is currently playing, update it now
         if addon.UpdateAnimationTexture then
             addon:UpdateAnimationTexture()
         end
@@ -158,28 +194,31 @@ end
 
 -- Check for sudden haste increase
 local function CheckHasteForBloodlust()
+    if bloodlustCooldown > 0 then
+        bloodlustCooldown = bloodlustCooldown - CHECK_INTERVAL
+        return isLusted
+    end
+    
     local currentHaste = GetCurrentHaste()
     
-    -- Initialize baseline haste state if needed
     if not baselineHaste then
         baselineHaste = currentHaste
         return false
     end
     
-    -- Calculate the increase (as decimal, e.g. 0.30 for 30%)
     local hasteIncrease = (currentHaste - baselineHaste) / 100
     
-    -- Bloodlust state detected
     if hasteIncrease >= HASTE_THRESHOLD and not isLusted then
         isLusted = true
+        bloodlustCooldown = BLOODLUST_COOLDOWN
         PlayDjLust()
         return true
     end
     
-    -- Bloodlust state ended
     if hasteIncrease < (HASTE_THRESHOLD / 2) and isLusted then
         isLusted = false
         baselineHaste = currentHaste
+        bloodlustCooldown = 0
         StopDjLust()
         return false
     end
@@ -187,17 +226,17 @@ local function CheckHasteForBloodlust()
     return isLusted
 end
 
--- Periodic haste checker
+-- Start haste monitoring
 local function StartHasteMonitoring()
     if hasteCheckTimer then
         hasteCheckTimer:Cancel()
+        hasteCheckTimer = nil
     end
     
     hasteCheckTimer = C_Timer.NewTicker(CHECK_INTERVAL, function()
         if InCombatLockdown() then
             CheckHasteForBloodlust()
         else
-            -- Out of combat, update baseline (no spam)
             if not isLusted then
                 baselineHaste = GetCurrentHaste()
             end
@@ -205,25 +244,61 @@ local function StartHasteMonitoring()
     end)
 end
 
+-- Stop haste monitoring
+local function StopHasteMonitoring()
+    if hasteCheckTimer then
+        hasteCheckTimer:Cancel()
+        hasteCheckTimer = nil
+    end
+end
+
+-- COMPREHENSIVE CLEANUP (MEMORY LEAK FIX)
+local function Cleanup()
+    printDebug("Running comprehensive cleanup...")
+    
+    -- Stop monitoring
+    StopHasteMonitoring()
+    
+    -- Stop music and sounds
+    StopDjLust()
+    
+    -- Reset state
+    isLusted = false
+    baselineHaste = nil
+    bloodlustCooldown = 0
+    lastPlayTime = 0
+    
+    -- Force garbage collection (aggressive)
+    collectgarbage("collect")
+    
+    -- Second pass after short delay
+    C_Timer.After(0.1, function()
+        collectgarbage("collect")
+        printDebug("Garbage collection complete")
+    end)
+end
+
 -- Event handler
 frame:RegisterEvent("PLAYER_ENTERING_WORLD")
-frame:RegisterEvent("PLAYER_REGEN_DISABLED") -- Entered combat
-frame:RegisterEvent("PLAYER_REGEN_ENABLED")  -- Left combat
+frame:RegisterEvent("PLAYER_REGEN_DISABLED")
+frame:RegisterEvent("PLAYER_REGEN_ENABLED")
+frame:RegisterEvent("PLAYER_LOGOUT")
 frame:SetScript("OnEvent", function(self, event, ...)
     if event == "PLAYER_ENTERING_WORLD" then
-        printDebug("Loaded with Track: ", MUSIC_FILE)
+        printDebug("DjLust loaded - Theme: ", DjLustDB.theme or "chipi")
         baselineHaste = GetCurrentHaste()
         StartHasteMonitoring()
     elseif event == "PLAYER_REGEN_DISABLED" then
-        -- Entering combat - set base haste sample
         baselineHaste = GetCurrentHaste()
     elseif event == "PLAYER_REGEN_ENABLED" then
-        -- Left combat
         if isLusted then
             isLusted = false
             StopDjLust()
         end
         baselineHaste = GetCurrentHaste()
+        bloodlustCooldown = 0
+    elseif event == "PLAYER_LOGOUT" then
+        Cleanup()
     end
 end)
 
@@ -239,6 +314,7 @@ SlashCmdList["DJLUST"] = function(msg)
         print("[DjLust] [STOP] Stopping music...")
         StopDjLust()
         isLusted = false
+        bloodlustCooldown = 0
     elseif msg == "status" then
         print("[DjLust] [STATUS]:")
         print("  Bloodlusted:", isLusted and "YES" or "NO")
@@ -247,10 +323,15 @@ SlashCmdList["DJLUST"] = function(msg)
         print(string.format("  Current haste: %.1f%%", GetCurrentHaste()))
         local diff = baselineHaste and (GetCurrentHaste() - baselineHaste) or 0
         print(string.format("  Haste difference: %.1f%%", diff))
+        print(string.format("  Cooldown remaining: %.1fs", bloodlustCooldown))
+        print("  Ticker active:", hasteCheckTimer and "YES" or "NO")
+        print("  Sound handles active:", #soundHandlePool)
+        print("  Last play:", string.format("%.1fs ago", GetTime() - lastPlayTime))
     elseif msg == "reset" then
         print("[DjLust] [RESET] Resetting detection...")
         baselineHaste = GetCurrentHaste()
         isLusted = false
+        bloodlustCooldown = 0
         StopDjLust()
     elseif msg == "config" then
         print("[DjLust] [CONFIG]\nConfiguration:")
@@ -269,7 +350,6 @@ SlashCmdList["DJLUST"] = function(msg)
         print("\nTo change theme, use /djlust settings")
     elseif msg:match("^debug") then
         local arg = msg:match("^debug%s*(%S*)")
-
         if arg == "on" then
             SetDebug(true)
         elseif arg == "off" then
@@ -291,16 +371,27 @@ SlashCmdList["DJLUST"] = function(msg)
             print("|cff00bfff[DjLust]|r Usage: /djlust volume <0-100>")
             print(string.format("  Current volume: %d%%", math.floor((DjLustDB.volume or 1.0) * 100)))
         end
+    elseif msg == "cleanup" then
+        Cleanup()
+        print("|cff00bfff[DjLust]|r Cleanup complete - all resources freed")
+    elseif msg == "mem" then
+        -- Memory diagnostic
+        UpdateAddOnMemoryUsage()
+        local mem = GetAddOnMemoryUsage("DjLust")
+        print(string.format("|cff00bfff[DjLust]|r Memory usage: %.2f KB", mem))
+        print("  Sound handles:", #soundHandlePool)
+        print("  Ticker active:", hasteCheckTimer and "YES" or "NO")
     else
         print("|cff00bfff[DjLust] [HELP]\nAvailable Commands:|r")
         print("  |cffff8800/djlust status|r - Show current status")
-        print("  |cffff8800/djlust test|r - Test music playback for .mp3 @ ", MUSIC_FILE)
+        print("  |cffff8800/djlust test|r - Test music playback")
         print("  |cffff8800/djlust stop|r - Stop music")
         print("  |cffff8800/djlust reset|r - Reset detection")
         print("  |cffff8800/djlust config|r - Show configuration")
         print("  |cffff8800/djlust volume <0-100>|r - Set music volume")
-        print("  |cffff8800/djlust debug on|r  - Enable debug output")
-        print("  |cffff8800/djlust debug off|r - Disable debug output")
+        print("  |cffff8800/djlust debug on/off|r - Toggle debug output")
+        print("  |cffff8800/djlust cleanup|r - Force cleanup and garbage collection")
+        print("  |cffff8800/djlust mem|r - Show memory usage")
         print("|cff00bfff[TIP]|r |cffff8800/djl|r can be used as shortcut/alias of |cffff8800/djlust|r")
     end
 end
