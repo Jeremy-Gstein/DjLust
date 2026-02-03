@@ -1,5 +1,4 @@
 -- MinimapButton.lua: Minimap button for DjLust
--- Using proven LibDBIcon-style positioning
 
 local addonName, addon = ...
 
@@ -12,9 +11,9 @@ DjLustDB.minimap = DjLustDB.minimap or {
     hide = false,
 }
 
---------------------------------------------------
--- Positioning (based on LibDBIcon)
---------------------------------------------------
+-----------------------------------------------------
+-- Positioning Icon
+-----------------------------------------------------
 local function UpdateButtonPosition(button)
     local angle = math.rad(DjLustDB.minimap.angle or 225)
     local x, y, q = math.cos(angle), math.sin(angle), 1
@@ -39,7 +38,7 @@ local function CreateMinimapButton()
     end
     
     local btn = CreateFrame("Button", BUTTON_NAME, Minimap)
-    btn:SetSize(31, 31)  -- LibDBIcon uses 31x31
+    btn:SetSize(31, 31)  
     btn:SetFrameStrata("MEDIUM")
     btn:SetFrameLevel(8)
     btn:EnableMouse(true)

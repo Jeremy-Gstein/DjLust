@@ -1,5 +1,4 @@
 -- SettingsGUI.lua: Custom settings panel for DjLust
--- Based on proven popup window approach
 
 local addonName, addon = ...
 
@@ -11,7 +10,7 @@ DjLustDB = DjLustDB or {
     debugMode = false,
     volume = 1.0, -- Volume level (0.0 to 1.0)
     theme = "chipi", -- Selected theme: "chipi", "pedro", or "custom"
-    customSong = "", -- Custom song filename from Songs folder
+    customSong = "", -- Custom song filename from AddOns\\Songs\\ folder
 }
 
 local settingsFrame
@@ -196,24 +195,65 @@ local function CreateSettingsWindow()
     --------------------------------------------------
     local dropdownLabel = content:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
     dropdownLabel:SetPoint("TOPLEFT", 55, yOffset)
-    dropdownLabel:SetText("Select song from Songs folder:")
+    dropdownLabel:SetText("Select song from Interface\\AddOns\\Songs folder:")
     yOffset = yOffset - 20
     
     -- Create dropdown frame
     local dropdown = CreateFrame("Frame", "DjLustSongDropdown", content, "UIDropDownMenuTemplate")
     dropdown:SetPoint("TOPLEFT", 45, yOffset)
     
-    -- Function to get available songs
+    -- Function to get available songs from CustomSongs.lua
     local function GetAvailableSongs()
         local songs = {"(None)"}
         
-        -- Placeholder songs - users will manually add .mp3 files to Interface\AddOns\Songs\
-        local testSongs = {
-            "bmth.mp3",
-        }
+        -- Check if CUSTOM_SONGS exists
+        if not CUSTOM_SONGS or type(CUSTOM_SONGS) ~= "table" then
+            print("|cff00bfff[DjLust]|r |cffff8800No custom songs defined.|r")
+            print("  Edit CustomSongs.lua to add your song filenames")
+            return songs
+        end
         
-        for _, songFile in ipairs(testSongs) do
-            table.insert(songs, songFile)
+        -- Verify each song exists by trying to play it
+        local foundSongs = {}
+        local testedCount = 0
+        
+        for _, songFile in ipairs(CUSTOM_SONGS) do
+            testedCount = testedCount + 1
+            
+            -- Clean up the filename (in case user added extra spaces)
+            songFile = songFile:match("^%s*(.-)%s*$")
+            
+            if songFile ~= "" then
+                local path = "Interface\\AddOns\\Songs\\" .. songFile
+                local willPlay, handle = PlaySoundFile(path, "Master")
+                if willPlay and handle then
+                    table.insert(foundSongs, songFile)
+                    StopSound(handle)
+                else
+                    print("|cff00bfff[DjLust]|r |cffff8800Warning:|r Could not find: " .. songFile)
+                end
+            end
+        end
+        
+        -- Sort the found songs
+        table.sort(foundSongs)
+        
+        -- Add all found songs to the list
+        for _, song in ipairs(foundSongs) do
+            table.insert(songs, song)
+        end
+        
+        -- Feedback
+        if #foundSongs == 0 then
+            print("|cff00bfff[DjLust]|r |cffff8800No custom songs found.|r")
+            print("  1. Put .mp3 files in: Interface\\AddOns\\Songs\\")
+            print("  2. Add filenames to CustomSongs.lua")
+            print("  3. Reload UI with /reload")
+        else
+            print("|cff00bfff[DjLust]|r Found |cff00ff00" .. #foundSongs .. "|r custom song(s)")
+            if #foundSongs < testedCount then
+                print("  |cffff8800(" .. (testedCount - #foundSongs) .. " song(s) not found - check filenames)|r")
+            end
         end
         
         return songs
@@ -265,12 +305,24 @@ local function CreateSettingsWindow()
     
     RefreshSongDropdown()
     
+    -- Refresh button (create after RefreshSongDropdown is defined)
+    local refreshBtn = CreateFrame("Button", nil, content, "UIPanelButtonTemplate")
+    refreshBtn:SetPoint("LEFT", dropdown, "RIGHT", -15, 2)
+    refreshBtn:SetSize(31, 31)
+    refreshBtn:SetText("scan") -- fix for refresh button to scan Songs\.
+    refreshBtn:SetScript("OnClick", function()
+        RefreshSongDropdown()
+        print("|cff00bfff[DjLust]|r Rescanning Songs folder...")
+    end)
+    
     -- Enable/disable dropdown based on custom radio selection
     local function UpdateDropdownState()
         if DjLustDB.theme == "custom" then
             UIDropDownMenu_EnableDropDown(dropdown)
+            refreshBtn:Enable()
         else
             UIDropDownMenu_DisableDropDown(dropdown)
+            refreshBtn:Disable()
         end
     end
     
