@@ -10,7 +10,8 @@ DjLustDB = DjLustDB or {
     animationFPS = 8,
     debugMode = false,
     volume = 1.0, -- Volume level (0.0 to 1.0)
-    theme = "chipi", -- Selected theme: "chipi" or "alternative"
+    theme = "chipi", -- Selected theme: "chipi", "pedro", or "custom"
+    customSong = "", -- Custom song filename from Songs folder
 }
 
 local settingsFrame
@@ -180,11 +181,110 @@ local function CreateSettingsWindow()
     pedroRadio.text:SetText("Pedro Theme")
     pedroRadio:SetChecked(DjLustDB.theme == "pedro")
     
-    -- Set OnClick handlers AFTER both buttons are created
+    yOffset = yOffset - 25
+    
+    -- Custom Theme Radio Button
+    local customRadio = CreateFrame("CheckButton", nil, content, "UIRadioButtonTemplate")
+    customRadio:SetPoint("TOPLEFT", 35, yOffset)
+    customRadio.text:SetText("Custom Song")
+    customRadio:SetChecked(DjLustDB.theme == "custom")
+    
+    yOffset = yOffset - 30
+    
+    --------------------------------------------------
+    -- Custom Song Dropdown
+    --------------------------------------------------
+    local dropdownLabel = content:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
+    dropdownLabel:SetPoint("TOPLEFT", 55, yOffset)
+    dropdownLabel:SetText("Select song from Songs folder:")
+    yOffset = yOffset - 20
+    
+    -- Create dropdown frame
+    local dropdown = CreateFrame("Frame", "DjLustSongDropdown", content, "UIDropDownMenuTemplate")
+    dropdown:SetPoint("TOPLEFT", 45, yOffset)
+    
+    -- Function to get available songs
+    local function GetAvailableSongs()
+        local songs = {"(None)"}
+        
+        -- Placeholder songs - users will manually add .mp3 files to Interface\AddOns\Songs\
+        local testSongs = {
+            "bmth.mp3",
+        }
+        
+        for _, songFile in ipairs(testSongs) do
+            table.insert(songs, songFile)
+        end
+        
+        return songs
+    end
+    
+    -- Refresh song list and update dropdown
+    local function RefreshSongDropdown()
+        local songs = GetAvailableSongs()
+        
+        UIDropDownMenu_Initialize(dropdown, function(self, level)
+            local info = UIDropDownMenu_CreateInfo()
+            
+            for _, songFile in ipairs(songs) do
+                info.text = songFile
+                info.value = songFile
+                info.func = function(self)
+                    if songFile == "(None)" then
+                        DjLustDB.customSong = ""
+                    else
+                        DjLustDB.customSong = songFile
+                    end
+                    UIDropDownMenu_SetText(dropdown, songFile)
+                    CloseDropDownMenus()
+                    
+                    -- Auto-select custom theme when a song is picked
+                    if songFile ~= "(None)" then
+                        DjLustDB.theme = "custom"
+                        chipiRadio:SetChecked(false)
+                        pedroRadio:SetChecked(false)
+                        customRadio:SetChecked(true)
+                        if addon.UpdateTheme then
+                            addon:UpdateTheme("custom")
+                        end
+                        print("|cff00bfff[DjLust]|r Custom song set to: |cff00ff00" .. songFile .. "|r")
+                    end
+                end
+                info.checked = (DjLustDB.customSong == songFile) or (songFile == "(None)" and DjLustDB.customSong == "")
+                UIDropDownMenu_AddButton(info)
+            end
+        end)
+        
+        -- Set initial text
+        if DjLustDB.customSong and DjLustDB.customSong ~= "" then
+            UIDropDownMenu_SetText(dropdown, DjLustDB.customSong)
+        else
+            UIDropDownMenu_SetText(dropdown, "(None)")
+        end
+    end
+    
+    RefreshSongDropdown()
+    
+    -- Enable/disable dropdown based on custom radio selection
+    local function UpdateDropdownState()
+        if DjLustDB.theme == "custom" then
+            UIDropDownMenu_EnableDropDown(dropdown)
+        else
+            UIDropDownMenu_DisableDropDown(dropdown)
+        end
+    end
+    
+    UpdateDropdownState()
+    
+    yOffset = yOffset - 35
+    
+    -- Set OnClick handlers
     chipiRadio:SetScript("OnClick", function(self)
         DjLustDB.theme = "chipi"
         chipiRadio:SetChecked(true)
         pedroRadio:SetChecked(false)
+        customRadio:SetChecked(false)
+        UpdateDropdownState()
         if addon.UpdateTheme then
             addon:UpdateTheme("chipi")
         end
@@ -195,13 +295,31 @@ local function CreateSettingsWindow()
         DjLustDB.theme = "pedro"
         chipiRadio:SetChecked(false)
         pedroRadio:SetChecked(true)
+        customRadio:SetChecked(false)
+        UpdateDropdownState()
         if addon.UpdateTheme then
             addon:UpdateTheme("pedro")
         end
         print("|cff00bfff[DjLust]|r Theme changed to: |cff00ff00Pedro|r")
     end)
     
-    yOffset = yOffset - 30
+    customRadio:SetScript("OnClick", function(self)
+        DjLustDB.theme = "custom"
+        chipiRadio:SetChecked(false)
+        pedroRadio:SetChecked(false)
+        customRadio:SetChecked(true)
+        UpdateDropdownState()
+        if addon.UpdateTheme then
+            addon:UpdateTheme("custom")
+        end
+        
+        if DjLustDB.customSong and DjLustDB.customSong ~= "" then
+            print("|cff00bfff[DjLust]|r Theme changed to: |cff9370dbCustom|r (" .. DjLustDB.customSong .. ")")
+        else
+            print("|cff00bfff[DjLust]|r Theme changed to: |cff9370dbCustom|r (No song selected)")
+        end
+    end)
+    
     
     --------------------------------------------------
     -- Volume Slider
@@ -349,6 +467,7 @@ frame:SetScript("OnEvent", function(self, event, loadedAddon)
         -- Ensure all settings have default values
         DjLustDB.volume = DjLustDB.volume or 1.0
         DjLustDB.theme = DjLustDB.theme or "chipi"
+        DjLustDB.customSong = DjLustDB.customSong or ""
         
         -- Apply saved settings
         if DjLustDB.debugMode then

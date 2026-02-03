@@ -1,5 +1,6 @@
 -- DjLust: Production version with music!
 -- Detects Bloodlust (and similar spells) via haste changes and plays music
+-- MEMORY LEAK FIXED VERSION - Aggressive cleanup
 
 local addonName, addon = ...
 
@@ -7,6 +8,7 @@ local addonName, addon = ...
 DjLustDB = DjLustDB or {}
 DjLustDB.volume = DjLustDB.volume or 1.0
 DjLustDB.theme = DjLustDB.theme or "chipi"
+DjLustDB.customSong = DjLustDB.customSong or ""
 
 -- Theme configurations
 local THEMES = {
@@ -20,6 +22,11 @@ local THEMES = {
         music = "Interface\\AddOns\\DjLust\\pedrolust.mp3",
         animation = "Interface\\AddOns\\DjLust\\pedrolust.tga",
     },
+    custom = {
+        name = "Custom Song",
+        music = nil,  -- Set dynamically from DjLustDB.customSong
+        animation = "Interface\\AddOns\\DjLust\\pedrolust.tga", 
+    },
 }
 
 -- Track state
@@ -29,12 +36,12 @@ local hasteCheckTimer = nil
 local debugAddon = false
 local bloodlustCooldown = 0
 
--- Sound handle management 
+-- Sound handle management (MEMORY LEAK FIX)
 local soundHandlePool = {}
 local lastPlayTime = 0
 local PLAY_COOLDOWN = 0.5  -- Prevent rapid-fire plays
 
--- CVar caching 
+-- CVar caching (MEMORY LEAK FIX)
 local originalDialogVolume = nil
 local cvarDirty = false
 
@@ -46,6 +53,17 @@ local BLOODLUST_COOLDOWN = 30
 -- Get current theme's music file
 local function GetMusicFile()
     local theme = THEMES[DjLustDB.theme] or THEMES.chipi
+    
+    -- For custom theme, use the selected custom song
+    if DjLustDB.theme == "custom" then
+        if DjLustDB.customSong and DjLustDB.customSong ~= "" then
+            return "Interface\\AddOns\\Songs\\" .. DjLustDB.customSong
+        else
+            printDebug("Custom theme selected but no song chosen, using default")
+            return THEMES.chipi.music
+        end
+    end
+    
     return theme.music
 end
 
@@ -72,7 +90,7 @@ local function GetCurrentHaste()
     return GetHaste() or 0
 end
 
--- Cleanup all sound handles
+-- MEMORY LEAK FIX: Cleanup all sound handles
 local function CleanupSoundHandles()
     for i = #soundHandlePool, 1, -1 do
         local handle = soundHandlePool[i]
@@ -86,7 +104,7 @@ local function CleanupSoundHandles()
     wipe(soundHandlePool)
 end
 
--- Restore CVar only when needed
+-- MEMORY LEAK FIX: Restore CVar only when needed
 local function RestoreDialogVolume()
     if cvarDirty and originalDialogVolume then
         SetCVar("Sound_DialogVolume", tostring(originalDialogVolume))
@@ -96,7 +114,7 @@ local function RestoreDialogVolume()
     end
 end
 
--- Play bloodlust music 
+-- Play bloodlust music (WITH MEMORY LEAK FIXES)
 local function PlayDjLust()
     -- DEBOUNCE: Prevent rapid-fire calls
     local now = GetTime()
@@ -154,7 +172,7 @@ local function PlayDjLust()
     end
 end
 
--- Stop bloodlust music 
+-- Stop bloodlust music (WITH MEMORY LEAK FIXES)
 local function StopDjLust()
     -- Stop and cleanup all sound handles
     CleanupSoundHandles()

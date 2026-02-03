@@ -17,6 +17,12 @@ local THEMES = {
         columns = 4,
         rows = 8,
     },
+    custom = {
+        texture = "Interface\\AddOns\\DjLust\\pedrolust.tga",
+        frameCount = 32,
+        columns = 4,
+        rows = 8,
+    },
 }
 
 -- Animation state
