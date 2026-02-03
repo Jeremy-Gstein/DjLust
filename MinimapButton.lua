@@ -43,7 +43,7 @@ local function CreateMinimapButton()
     btn:SetFrameStrata("MEDIUM")
     btn:SetFrameLevel(8)
     btn:EnableMouse(true)
-    btn:RegisterForClicks("LeftButtonUp", "RightButtonUp")
+    btn:RegisterForClicks("LeftButtonUp")
     btn:RegisterForDrag("LeftButton")
     btn:SetClampedToScreen(true)
     
@@ -77,7 +77,6 @@ local function CreateMinimapButton()
         GameTooltip:AddLine("|cff00bfffDjLust|r", 1, 1, 1)
         GameTooltip:AddLine(" ")
         GameTooltip:AddLine("|cffff8800Left Click:|r Open Settings", 0.8, 0.8, 0.8)
-        GameTooltip:AddLine("|cffff8800Right Click:|r Quick Menu", 0.8, 0.8, 0.8)
         GameTooltip:AddLine("|cffff8800Drag:|r Move Icon", 0.8, 0.8, 0.8)
         GameTooltip:Show()
     end)
@@ -96,9 +95,6 @@ local function CreateMinimapButton()
             else
                 SlashCmdList["DJLUST"]("settings")
             end
-        elseif button == "RightButton" then
-            -- Show quick menu
-            ShowQuickMenu(self)
         end
     end)
     
@@ -126,114 +122,6 @@ local function CreateMinimapButton()
     if DjLustDB.minimap.hide then
         btn:Hide()
     end
-end
-
---------------------------------------------------
--- Quick Menu (Right Click)
---------------------------------------------------
-local menuFrame
-function ShowQuickMenu(parent)
-    if not menuFrame then
-        menuFrame = CreateFrame("Frame", "DjLustQuickMenu", UIParent, "UIDropDownMenuTemplate")
-    end
-    
-    local menuList = {
-        {
-            text = "|cff00bfffDjLust Quick Menu|r",
-            isTitle = true,
-            notCheckable = true,
-        },
-        {
-            text = " ",
-            notCheckable = true,
-            disabled = true,
-        },
-        {
-            text = "|cffff8800Test Music|r",
-            notCheckable = true,
-            func = function()
-                SlashCmdList["DJLUST"]("test")
-            end,
-        },
-        {
-            text = "|cffff8800Stop Music|r",
-            notCheckable = true,
-            func = function()
-                SlashCmdList["DJLUST"]("stop")
-            end,
-        },
-        {
-            text = "|cffff8800Toggle Animation|r",
-            notCheckable = true,
-            func = function()
-                SlashCmdList["DJLANIM"]("toggle")
-            end,
-        },
-        {
-            text = " ",
-            notCheckable = true,
-            disabled = true,
-        },
-        {
-            text = "|cffff8800Show Status|r",
-            notCheckable = true,
-            func = function()
-                SlashCmdList["DJLUST"]("status")
-            end,
-        },
-        {
-            text = "|cffff8800Reset Detection|r",
-            notCheckable = true,
-            func = function()
-                SlashCmdList["DJLUST"]("reset")
-            end,
-        },
-        {
-            text = " ",
-            notCheckable = true,
-            disabled = true,
-        },
-        {
-            text = "Debug Mode",
-            checked = function() return DjLustDB.debugMode end,
-            func = function()
-                DjLustDB.debugMode = not DjLustDB.debugMode
-                SlashCmdList["DJLUST"]("debug " .. (DjLustDB.debugMode and "on" or "off"))
-            end,
-        },
-        {
-            text = " ",
-            notCheckable = true,
-            disabled = true,
-        },
-        {
-            text = "|cffff8800Open Settings|r",
-            notCheckable = true,
-            func = function()
-                if addon.ToggleSettings then
-                    addon:ShowSettings()
-                else
-                    SlashCmdList["DJLUST"]("settings")
-                end
-            end,
-        },
-        {
-            text = "Hide Minimap Button",
-            notCheckable = true,
-            func = function()
-                DjLustDB.minimap.hide = true
-                _G[BUTTON_NAME]:Hide()
-                print("|cff00bfff[DjLust]|r Minimap button hidden. Use |cffff8800/djlust minimap|r to show it again.")
-            end,
-        },
-        {
-            text = "|cff808080Close|r",
-            notCheckable = true,
-            func = function() end,
-        },
-    }
-    
-    EasyMenu(menuList, menuFrame, "cursor", 0, 0, "MENU")
 end
 
 --------------------------------------------------
