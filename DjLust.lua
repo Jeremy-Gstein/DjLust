@@ -1,6 +1,5 @@
 -- DjLust: Production version with music!
 -- Detects Bloodlust (and similar spells) via haste changes and plays music
--- MEMORY LEAK FIXED VERSION - Aggressive cleanup
 
 local addonName, addon = ...
 
@@ -30,12 +29,12 @@ local hasteCheckTimer = nil
 local debugAddon = false
 local bloodlustCooldown = 0
 
--- Sound handle management (MEMORY LEAK FIX)
+-- Sound handle management 
 local soundHandlePool = {}
 local lastPlayTime = 0
 local PLAY_COOLDOWN = 0.5  -- Prevent rapid-fire plays
 
--- CVar caching (MEMORY LEAK FIX)
+-- CVar caching 
 local originalDialogVolume = nil
 local cvarDirty = false
 
@@ -73,7 +72,7 @@ local function GetCurrentHaste()
     return GetHaste() or 0
 end
 
--- MEMORY LEAK FIX: Cleanup all sound handles
+-- Cleanup all sound handles
 local function CleanupSoundHandles()
     for i = #soundHandlePool, 1, -1 do
         local handle = soundHandlePool[i]
@@ -87,7 +86,7 @@ local function CleanupSoundHandles()
     wipe(soundHandlePool)
 end
 
--- MEMORY LEAK FIX: Restore CVar only when needed
+-- Restore CVar only when needed
 local function RestoreDialogVolume()
     if cvarDirty and originalDialogVolume then
         SetCVar("Sound_DialogVolume", tostring(originalDialogVolume))
@@ -97,7 +96,7 @@ local function RestoreDialogVolume()
     end
 end
 
--- Play bloodlust music (WITH MEMORY LEAK FIXES)
+-- Play bloodlust music 
 local function PlayDjLust()
     -- DEBOUNCE: Prevent rapid-fire calls
     local now = GetTime()
@@ -155,7 +154,7 @@ local function PlayDjLust()
     end
 end
 
--- Stop bloodlust music (WITH MEMORY LEAK FIXES)
+-- Stop bloodlust music 
 local function StopDjLust()
     -- Stop and cleanup all sound handles
     CleanupSoundHandles()

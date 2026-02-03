@@ -173,6 +173,14 @@ local function CreateSettingsWindow()
     chipiRadio:SetPoint("TOPLEFT", 35, yOffset)
     chipiRadio.text:SetText("Chipi Chipi (Default)")
     chipiRadio:SetChecked(DjLustDB.theme == "chipi")
+    
+    -- Pedro Theme Radio Button
+    local pedroRadio = CreateFrame("CheckButton", nil, content, "UIRadioButtonTemplate")
+    pedroRadio:SetPoint("TOPLEFT", 225, yOffset)
+    pedroRadio.text:SetText("Pedro Theme")
+    pedroRadio:SetChecked(DjLustDB.theme == "pedro")
+    
+    -- Set OnClick handlers AFTER both buttons are created
     chipiRadio:SetScript("OnClick", function(self)
         DjLustDB.theme = "chipi"
         chipiRadio:SetChecked(true)
@@ -183,11 +191,6 @@ local function CreateSettingsWindow()
         print("|cff00bfff[DjLust]|r Theme changed to: |cffff1493Chipi Chipi|r")
     end)
     
-    -- Pedro Theme Radio Button
-    local pedroRadio = CreateFrame("CheckButton", nil, content, "UIRadioButtonTemplate")
-    pedroRadio:SetPoint("TOPLEFT", 225, yOffset)
-    pedroRadio.text:SetText("Pedro Theme")
-    pedroRadio:SetChecked(DjLustDB.theme == "pedro")
     pedroRadio:SetScript("OnClick", function(self)
         DjLustDB.theme = "pedro"
         chipiRadio:SetChecked(false)
