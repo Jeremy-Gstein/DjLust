@@ -1,5 +1,5 @@
 ## Interface: 120000, 120001
-## Version: 0.3.0
+## Version: 0.3.5
 ## Title: DjLust
 ## Notes: Play music and display animations when Bloodlust and other similar spells are detected!
 ## Author: Jeremy-Gstein
