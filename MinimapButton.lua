@@ -4,7 +4,7 @@ local addonName, addon = ...
 
 local BUTTON_NAME = "DjLust_MinimapButton"
 
--- Initialize saved position
+-- Initialize saved position (don't overwrite if it exists)
 DjLustDB = DjLustDB or {}
 DjLustDB.minimap = DjLustDB.minimap or {
     angle = 225,
@@ -32,9 +32,10 @@ end
 -- Creation
 --------------------------------------------------
 local function CreateMinimapButton()
+    -- CRITICAL FIX: If button already exists, just return it
     if _G[BUTTON_NAME] then
         UpdateButtonPosition(_G[BUTTON_NAME])
-        return
+        return _G[BUTTON_NAME]
     end
     
     local btn = CreateFrame("Button", BUTTON_NAME, Minimap)
@@ -88,11 +89,14 @@ local function CreateMinimapButton()
     --------------------------------------------------
     btn:SetScript("OnClick", function(self, button)
         if button == "LeftButton" then
-            -- Open settings
-            if addon.ToggleSettings then
+            -- CRITICAL FIX: Use addon:ToggleSettings() for proper window management
+            if addon and addon.ToggleSettings then
                 addon:ToggleSettings()
             else
-                SlashCmdList["DJLUST"]("settings")
+                -- Fallback if addon table not ready
+                if SlashCmdList["DJLUST"] then
+                    SlashCmdList["DJLUST"]("settings")
+                end
             end
         end
     end)
@@ -121,6 +125,8 @@ local function CreateMinimapButton()
     if DjLustDB.minimap.hide then
         btn:Hide()
     end
+    
+    return btn
 end
 
 --------------------------------------------------

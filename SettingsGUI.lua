@@ -2,24 +2,41 @@
 
 local addonName, addon = ...
 
--- Saved variables
-DjLustDB = DjLustDB or {
-    animationEnabled = true,
-    animationSize = 128,
-    animationFPS = 8,
-    debugMode = false,
-    volume = 1.0, -- Volume level (0.0 to 1.0)
-    theme = "chipi", -- Selected theme: "chipi", "pedro", or "custom"
-    customSong = "", -- Custom song filename from AddOns\\Songs\\ folder
-}
-
 local settingsFrame
+
+--------------------------------------------------
+-- Ensure all DB fields exist with defaults
+--------------------------------------------------
+local function EnsureDBDefaults()
+    if not DjLustDB then
+        DjLustDB = {}
+    end
+    
+    -- Set defaults for any missing fields
+    if DjLustDB.animationEnabled == nil then
+        DjLustDB.animationEnabled = true
+    end
+    DjLustDB.animationSize = DjLustDB.animationSize or 128
+    DjLustDB.animationFPS = DjLustDB.animationFPS or 8
+    DjLustDB.debugMode = DjLustDB.debugMode or false
+    DjLustDB.volume = DjLustDB.volume or 1.0
+    DjLustDB.theme = DjLustDB.theme or "chipi"
+    DjLustDB.customSong = DjLustDB.customSong or ""
+    DjLustDB.animationX = DjLustDB.animationX or 0
+    DjLustDB.animationY = DjLustDB.animationY or 0
+end
 
 --------------------------------------------------
 -- Create Settings Window
 --------------------------------------------------
 local function CreateSettingsWindow()
-    if settingsFrame then return settingsFrame end
+    -- CRITICAL FIX: Check if window already exists globally
+    if _G["DjLustSettingsFrame"] then
+        return _G["DjLustSettingsFrame"]
+    end
+    
+    -- CRITICAL FIX: Ensure database is initialized
+    EnsureDBDefaults()
     
     local WIDTH, HEIGHT = 450, 550
     
@@ -28,6 +45,7 @@ local function CreateSettingsWindow()
     f:SetSize(WIDTH, HEIGHT)
     f:SetPoint("CENTER")
     f:SetFrameStrata("DIALOG")
+    f:SetFrameLevel(100)  -- Ensure it's on top
     
     -- Dragging
     f:SetMovable(true)
@@ -56,6 +74,9 @@ local function CreateSettingsWindow()
     -- Close button
     local close = CreateFrame("Button", nil, f, "UIPanelCloseButton")
     close:SetPoint("TOPRIGHT", -8, -8)
+    close:SetScript("OnClick", function()
+        f:Hide()
+    end)
     
     -- Create ScrollFrame
     local scrollFrame = CreateFrame("ScrollFrame", nil, f, "UIPanelScrollFrameTemplate")
@@ -73,7 +94,7 @@ local function CreateSettingsWindow()
     
     -- Create content frame (child of scroll frame)
     local content = CreateFrame("Frame", nil, scrollFrame)
-    content:SetSize(WIDTH - 50, 700) -- Tall enough for all content
+    content:SetSize(WIDTH - 50, 500) -- Reduced height to fit actual content
     scrollFrame:SetScrollChild(content)
     
     local yOffset = -10
@@ -208,121 +229,80 @@ local function CreateSettingsWindow()
         
         -- Check if CUSTOM_SONGS exists
         if not CUSTOM_SONGS or type(CUSTOM_SONGS) ~= "table" then
-            print("|cff00bfff[DjLust]|r |cffff8800No custom songs defined.|r")
-            print("  Edit CustomSongs.lua to add your song filenames")
             return songs
         end
         
-        -- Verify each song exists by trying to play it
-        local foundSongs = {}
-        local testedCount = 0
-        
+        -- Verify each song file exists before adding to list
         for _, songFile in ipairs(CUSTOM_SONGS) do
-            testedCount = testedCount + 1
-            
-            -- Clean up the filename (in case user added extra spaces)
+            -- Clean up the filename (remove extra spaces)
             songFile = songFile:match("^%s*(.-)%s*$")
             
             if songFile ~= "" then
                 local path = "Interface\\AddOns\\Songs\\" .. songFile
+                
+                -- Test if file exists by attempting to play it
                 local willPlay, handle = PlaySoundFile(path, "Master")
+                
                 if willPlay and handle then
-                    table.insert(foundSongs, songFile)
+                    -- File exists and is playable
+                    table.insert(songs, songFile)
+                    -- Stop the test playback immediately
                     StopSound(handle)
-                else
-                    print("|cff00bfff[DjLust]|r |cffff8800Warning:|r Could not find: " .. songFile)
                 end
-            end
-        end
-        
-        -- Sort the found songs
-        table.sort(foundSongs)
-        
-        -- Add all found songs to the list
-        for _, song in ipairs(foundSongs) do
-            table.insert(songs, song)
-        end
-        
-        -- Feedback
-        if #foundSongs == 0 then
-            print("|cff00bfff[DjLust]|r |cffff8800No custom songs found.|r")
-            print("  1. Put .mp3 files in: Interface\\AddOns\\Songs\\")
-            print("  2. Add filenames to CustomSongs.lua")
-            print("  3. Reload UI with /reload")
-        else
-            print("|cff00bfff[DjLust]|r Found |cff00ff00" .. #foundSongs .. "|r custom song(s)")
-            if #foundSongs < testedCount then
-                print("  |cffff8800(" .. (testedCount - #foundSongs) .. " song(s) not found - check filenames)|r")
             end
         end
         
         return songs
     end
     
-    -- Refresh song list and update dropdown
-    local function RefreshSongDropdown()
+    -- Dropdown initialization
+    local function InitDropdown(self, level)
+        local info = UIDropDownMenu_CreateInfo()
         local songs = GetAvailableSongs()
         
-        UIDropDownMenu_Initialize(dropdown, function(self, level)
-            local info = UIDropDownMenu_CreateInfo()
-            
-            for _, songFile in ipairs(songs) do
-                info.text = songFile
-                info.value = songFile
-                info.func = function(self)
-                    if songFile == "(None)" then
-                        DjLustDB.customSong = ""
-                    else
-                        DjLustDB.customSong = songFile
-                    end
-                    UIDropDownMenu_SetText(dropdown, songFile)
-                    CloseDropDownMenus()
-                    
-                    -- Auto-select custom theme when a song is picked
-                    if songFile ~= "(None)" then
-                        DjLustDB.theme = "custom"
-                        chipiRadio:SetChecked(false)
-                        pedroRadio:SetChecked(false)
-                        customRadio:SetChecked(true)
-                        if addon.UpdateTheme then
-                            addon:UpdateTheme("custom")
-                        end
-                        print("|cff00bfff[DjLust]|r Custom song set to: |cff00ff00" .. songFile .. "|r")
-                    end
+        for _, song in ipairs(songs) do
+            info.text = song
+            info.value = song
+            info.func = function(self)
+                if song == "(None)" then
+                    DjLustDB.customSong = ""
+                    UIDropDownMenu_SetText(dropdown, "(None)")
+                else
+                    DjLustDB.customSong = song
+                    UIDropDownMenu_SetText(dropdown, song)
                 end
-                info.checked = (DjLustDB.customSong == songFile) or (songFile == "(None)" and DjLustDB.customSong == "")
-                UIDropDownMenu_AddButton(info)
+                
+                -- Update theme if custom is selected
+                if DjLustDB.theme == "custom" then
+                    if addon.UpdateTheme then
+                        addon:UpdateTheme("custom")
+                    end
+                    print("|cff00bfff[DjLust]|r Custom song changed to: " .. (song == "(None)" and "None" or song))
+                end
             end
-        end)
-        
-        -- Set initial text
-        if DjLustDB.customSong and DjLustDB.customSong ~= "" then
-            UIDropDownMenu_SetText(dropdown, DjLustDB.customSong)
-        else
-            UIDropDownMenu_SetText(dropdown, "(None)")
+            info.checked = (DjLustDB.customSong == song) or (song == "(None)" and DjLustDB.customSong == "")
+            UIDropDownMenu_AddButton(info, level)
         end
     end
     
-    RefreshSongDropdown()
+    UIDropDownMenu_Initialize(dropdown, InitDropdown)
+    UIDropDownMenu_SetWidth(dropdown, 250)
     
-    -- Refresh button (create after RefreshSongDropdown is defined)
-    local refreshBtn = CreateFrame("Button", nil, content, "UIPanelButtonTemplate")
-    refreshBtn:SetPoint("LEFT", dropdown, "RIGHT", -15, 2)
-    refreshBtn:SetSize(31, 31)
-    refreshBtn:SetText("scan") -- fix for refresh button to scan Songs\.
-    refreshBtn:SetScript("OnClick", function()
-        RefreshSongDropdown()
-        print("|cff00bfff[DjLust]|r Rescanning Songs folder...")
-    end)
+    -- Set initial text
+    if DjLustDB.customSong and DjLustDB.customSong ~= "" then
+        UIDropDownMenu_SetText(dropdown, DjLustDB.customSong)
+    else
+        UIDropDownMenu_SetText(dropdown, "(None)")
+    end
     
-    -- Enable/disable dropdown based on custom radio selection
+    -- Function to enable/disable dropdown based on theme
     local function UpdateDropdownState()
         if DjLustDB.theme == "custom" then
             UIDropDownMenu_EnableDropDown(dropdown)
-            refreshBtn:Enable()
+            dropdownLabel:SetTextColor(1, 1, 1)
         else
             UIDropDownMenu_DisableDropDown(dropdown)
-            refreshBtn:Disable()
+            dropdownLabel:SetTextColor(0.5, 0.5, 0.5)
         end
     end
     
@@ -376,9 +356,6 @@ local function CreateSettingsWindow()
     --------------------------------------------------
     -- Volume Slider
     --------------------------------------------------
-    -- Ensure volume is initialized
-    DjLustDB.volume = DjLustDB.volume or 1.0
-    
     local volumeLabel = content:CreateFontString(nil, "OVERLAY", "GameFontNormal")
     volumeLabel:SetPoint("TOPLEFT", 25, yOffset)
     volumeLabel:SetText("Music Volume: " .. math.floor(DjLustDB.volume * 100) .. "%")
@@ -442,6 +419,8 @@ local function CreateSettingsWindow()
         if _G["DjLustAnimFrame"] then
             _G["DjLustAnimFrame"]:ClearAllPoints()
             _G["DjLustAnimFrame"]:SetPoint("CENTER", UIParent, "CENTER", 0, 0)
+            DjLustDB.animationX = 0
+            DjLustDB.animationY = 0
             print("|cff00bfff[DjLust]|r Animation position reset to center")
         end
     end)
@@ -454,25 +433,29 @@ local function CreateSettingsWindow()
     yOffset = yOffset - 35
     
     --------------------------------------------------
-    -- Detection Section Header
+    -- Debug Mode Section Header
     --------------------------------------------------
     local detectHeader = content:CreateFontString(nil, "OVERLAY", "GameFontNormalLarge")
     detectHeader:SetPoint("TOPLEFT", 20, yOffset)
-    detectHeader:SetText("|cffff8800Enable Debug Mode|r")
-    yOffset = yOffset - 35
+    detectHeader:SetText("|cffff8800Debug Mode|r")
+    yOffset = yOffset - 30
     
     --------------------------------------------------
     -- Debug Mode Checkbox
     --------------------------------------------------
     local debugCheck = CreateFrame("CheckButton", nil, content, "UICheckButtonTemplate")
     debugCheck:SetPoint("TOPLEFT", 25, yOffset)
-    debugCheck.text:SetText("Debug Mode")
+    debugCheck.text:SetText("Enable Debug Output")
     debugCheck:SetChecked(DjLustDB.debugMode)
     debugCheck:SetScript("OnClick", function(self)
         DjLustDB.debugMode = self:GetChecked()
         SlashCmdList["DJLUST"]("debug " .. (DjLustDB.debugMode and "on" or "off"))
     end)
+    yOffset = yOffset - 30
 
+    -- Calculate actual content height needed
+    local contentHeight = math.abs(yOffset) + 20  -- Add small padding at bottom
+    content:SetSize(WIDTH - 50, contentHeight)
     
     --------------------------------------------------
     -- Info Footer
@@ -490,17 +473,29 @@ end
 -- Show/Hide Settings
 --------------------------------------------------
 function addon:ToggleSettings()
-    local f = CreateSettingsWindow()
+    -- CRITICAL FIX: Always get the frame reference, create if needed
+    local f = _G["DjLustSettingsFrame"] or CreateSettingsWindow()
+    
     if f:IsShown() then
         f:Hide()
     else
+        -- Ensure DB is current before showing
+        EnsureDBDefaults()
         f:Show()
     end
 end
 
 function addon:ShowSettings()
-    local f = CreateSettingsWindow()
+    local f = _G["DjLustSettingsFrame"] or CreateSettingsWindow()
+    EnsureDBDefaults()
     f:Show()
+end
+
+function addon:HideSettings()
+    local f = _G["DjLustSettingsFrame"]
+    if f then
+        f:Hide()
+    end
 end
 
 --------------------------------------------------
@@ -516,26 +511,32 @@ local frame = CreateFrame("Frame")
 frame:RegisterEvent("ADDON_LOADED")
 frame:SetScript("OnEvent", function(self, event, loadedAddon)
     if loadedAddon == addonName then
-        -- Ensure all settings have default values
-        DjLustDB.volume = DjLustDB.volume or 1.0
-        DjLustDB.theme = DjLustDB.theme or "chipi"
-        DjLustDB.customSong = DjLustDB.customSong or ""
-        
-        -- Apply saved settings
-        if DjLustDB.debugMode then
-            C_Timer.After(0.1, function()
-                SlashCmdList["DJLUST"]("debug on")
-            end)
-        end
+        -- CRITICAL FIX: Wait for DjLust.lua to initialize DjLustDB first
+        C_Timer.After(0.1, function()
+            EnsureDBDefaults()
+            
+            -- Apply saved settings
+            if DjLustDB.debugMode then
+                C_Timer.After(0.2, function()
+                    if SlashCmdList["DJLUST"] then
+                        SlashCmdList["DJLUST"]("debug on")
+                    end
+                end)
+            end
+        end)
         
         -- Hook the main slash command
-        local originalHandler = SlashCmdList["DJLUST"]
-        SlashCmdList["DJLUST"] = function(msg)
-            if msg == "settings" or msg == "config" or msg == "options" then
-                addon:ToggleSettings()
-            else
-                originalHandler(msg)
+        C_Timer.After(0.2, function()
+            if SlashCmdList["DJLUST"] then
+                local originalHandler = SlashCmdList["DJLUST"]
+                SlashCmdList["DJLUST"] = function(msg)
+                    if msg == "settings" or msg == "config" or msg == "options" then
+                        addon:ToggleSettings()
+                    else
+                        originalHandler(msg)
+                    end
+                end
             end
-        end
+        end)
     end
 end)
