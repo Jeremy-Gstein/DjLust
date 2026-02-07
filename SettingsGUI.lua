@@ -16,14 +16,59 @@ local function EnsureDBDefaults()
     if DjLustDB.animationEnabled == nil then
         DjLustDB.animationEnabled = true
     end
+    if DjLustDB.debugMode == nil then
+        DjLustDB.debugMode = false
+    end
     DjLustDB.animationSize = DjLustDB.animationSize or 128
     DjLustDB.animationFPS = DjLustDB.animationFPS or 8
-    DjLustDB.debugMode = DjLustDB.debugMode or false
     DjLustDB.volume = DjLustDB.volume or 1.0
     DjLustDB.theme = DjLustDB.theme or "chipi"
     DjLustDB.customSong = DjLustDB.customSong or ""
     DjLustDB.animationX = DjLustDB.animationX or 0
     DjLustDB.animationY = DjLustDB.animationY or 0
+    DjLustDB.hasteThreshold = DjLustDB.hasteThreshold or 25  -- Default 25%
+end
+
+--------------------------------------------------
+-- Update UI values from database
+--------------------------------------------------
+local function UpdateUIValues(f)
+    if not f or not f.uiElements then return end
+    
+    local ui = f.uiElements
+    
+    -- Update checkboxes
+    if ui.enableAnim then
+        ui.enableAnim:SetChecked(DjLustDB.animationEnabled)
+    end
+    if ui.debugCheck then
+        ui.debugCheck:SetChecked(DjLustDB.debugMode)
+    end
+    
+    -- Update radio buttons
+    if ui.chipiRadio and ui.pedroRadio and ui.customRadio then
+        ui.chipiRadio:SetChecked(DjLustDB.theme == "chipi")
+        ui.pedroRadio:SetChecked(DjLustDB.theme == "pedro")
+        ui.customRadio:SetChecked(DjLustDB.theme == "custom")
+    end
+    
+    -- Update sliders
+    if ui.sizeSlider and ui.sizeLabel then
+        ui.sizeSlider:SetValue(DjLustDB.animationSize)
+        ui.sizeLabel:SetText("Animation Size: " .. DjLustDB.animationSize .. " px")
+    end
+    if ui.fpsSlider and ui.fpsLabel then
+        ui.fpsSlider:SetValue(DjLustDB.animationFPS)
+        ui.fpsLabel:SetText("Animation Speed: " .. DjLustDB.animationFPS .. " FPS")
+    end
+    if ui.volumeSlider and ui.volumeLabel then
+        ui.volumeSlider:SetValue(DjLustDB.volume)
+        ui.volumeLabel:SetText("Music Volume: " .. math.floor(DjLustDB.volume * 100) .. "%")
+    end
+    if ui.hasteSlider and ui.hasteLabel then
+        ui.hasteSlider:SetValue(DjLustDB.hasteThreshold)
+        ui.hasteLabel:SetText("Haste Threshold: " .. DjLustDB.hasteThreshold .. "%")
+    end
 end
 
 --------------------------------------------------
@@ -99,6 +144,9 @@ local function CreateSettingsWindow()
     
     local yOffset = -10
     
+    -- Store references to UI elements for updating
+    f.uiElements = {}
+    
     --------------------------------------------------
     -- Animation Section Header
     --------------------------------------------------
@@ -118,6 +166,7 @@ local function CreateSettingsWindow()
         DjLustDB.animationEnabled = self:GetChecked()
         print("|cff00bfff[DjLust]|r Animation " .. (DjLustDB.animationEnabled and "|cff00ff00enabled|r" or "|cffff0000disabled|r"))
     end)
+    f.uiElements.enableAnim = enableAnim
     yOffset = yOffset - 30
     
     --------------------------------------------------
@@ -145,6 +194,8 @@ local function CreateSettingsWindow()
             _G["DjLustAnimFrame"]:SetSize(value, value)
         end
     end)
+    f.uiElements.sizeSlider = sizeSlider
+    f.uiElements.sizeLabel = sizeLabel
     yOffset = yOffset - 35
     
     --------------------------------------------------
@@ -171,6 +222,8 @@ local function CreateSettingsWindow()
             addon:UpdateAnimationFPS(value)
         end
     end)
+    f.uiElements.fpsSlider = fpsSlider
+    f.uiElements.fpsLabel = fpsLabel
     yOffset = yOffset - 40
     
     --------------------------------------------------
@@ -208,6 +261,10 @@ local function CreateSettingsWindow()
     customRadio:SetPoint("TOPLEFT", 35, yOffset)
     customRadio.text:SetText("Custom Song")
     customRadio:SetChecked(DjLustDB.theme == "custom")
+    
+    f.uiElements.chipiRadio = chipiRadio
+    f.uiElements.pedroRadio = pedroRadio
+    f.uiElements.customRadio = customRadio
     
     yOffset = yOffset - 30
     
@@ -377,6 +434,8 @@ local function CreateSettingsWindow()
             addon:UpdateVolume(value)
         end
     end)
+    f.uiElements.volumeSlider = volumeSlider
+    f.uiElements.volumeLabel = volumeLabel
     yOffset = yOffset - 35
     
     --------------------------------------------------
@@ -433,6 +492,44 @@ local function CreateSettingsWindow()
     yOffset = yOffset - 35
     
     --------------------------------------------------
+    -- Detection Settings Section Header
+    --------------------------------------------------
+    local detectSettingsHeader = content:CreateFontString(nil, "OVERLAY", "GameFontNormalLarge")
+    detectSettingsHeader:SetPoint("TOPLEFT", 20, yOffset)
+    detectSettingsHeader:SetText("|cffff8800Detection Settings|r")
+    yOffset = yOffset - 30
+    
+    --------------------------------------------------
+    -- Haste Threshold Slider
+    --------------------------------------------------
+    local hasteLabel = content:CreateFontString(nil, "OVERLAY", "GameFontNormal")
+    hasteLabel:SetPoint("TOPLEFT", 25, yOffset)
+    hasteLabel:SetText("Haste Threshold: " .. DjLustDB.hasteThreshold .. "%")
+    yOffset = yOffset - 20
+    
+    local hasteHelp = content:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
+    hasteHelp:SetPoint("TOPLEFT", 25, yOffset)
+    hasteHelp:SetText("|cff808080Minimum haste increase to trigger music (Default: 25%)|r")
+    yOffset = yOffset - 25
+    
+    local hasteSlider = CreateFrame("Slider", nil, content, "OptionsSliderTemplate")
+    hasteSlider:SetPoint("TOPLEFT", 25, yOffset)
+    hasteSlider:SetWidth(380)
+    hasteSlider:SetMinMaxValues(10, 50)
+    hasteSlider:SetValue(DjLustDB.hasteThreshold)
+    hasteSlider:SetValueStep(1)
+    hasteSlider:SetObeyStepOnDrag(true)
+    hasteSlider.Low:SetText("10%")
+    hasteSlider.High:SetText("50%")
+    hasteSlider:SetScript("OnValueChanged", function(self, value)
+        DjLustDB.hasteThreshold = value
+        hasteLabel:SetText("Haste Threshold: " .. value .. "%")
+    end)
+    f.uiElements.hasteSlider = hasteSlider
+    f.uiElements.hasteLabel = hasteLabel
+    yOffset = yOffset - 35
+    
+    --------------------------------------------------
     -- Debug Mode Section Header
     --------------------------------------------------
     local detectHeader = content:CreateFontString(nil, "OVERLAY", "GameFontNormalLarge")
@@ -451,6 +548,7 @@ local function CreateSettingsWindow()
         DjLustDB.debugMode = self:GetChecked()
         SlashCmdList["DJLUST"]("debug " .. (DjLustDB.debugMode and "on" or "off"))
     end)
+    f.uiElements.debugCheck = debugCheck
     yOffset = yOffset - 30
 
     -- Calculate actual content height needed
@@ -481,6 +579,8 @@ function addon:ToggleSettings()
     else
         -- Ensure DB is current before showing
         EnsureDBDefaults()
+        -- Update all UI values from saved data
+        UpdateUIValues(f)
         f:Show()
     end
 end
@@ -488,6 +588,8 @@ end
 function addon:ShowSettings()
     local f = _G["DjLustSettingsFrame"] or CreateSettingsWindow()
     EnsureDBDefaults()
+    -- Update all UI values from saved data
+    UpdateUIValues(f)
     f:Show()
 end
 

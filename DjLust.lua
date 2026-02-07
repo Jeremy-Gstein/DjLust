@@ -8,6 +8,7 @@ DjLustDB = DjLustDB or {}
 DjLustDB.volume = DjLustDB.volume or 1.0
 DjLustDB.theme = DjLustDB.theme or "chipi"
 DjLustDB.customSong = DjLustDB.customSong or ""
+DjLustDB.hasteThreshold = DjLustDB.hasteThreshold or 25  -- Default 25%
 
 -- Theme configurations
 local THEMES = {
@@ -45,7 +46,6 @@ local originalDialogVolume = nil
 local cvarDirty = false
 
 -- Configuration
-local HASTE_THRESHOLD = 0.25
 local CHECK_INTERVAL = 0.5
 local BLOODLUST_COOLDOWN = 30
 
@@ -222,16 +222,18 @@ local function CheckHasteForBloodlust()
         return false
     end
     
+    -- Use configured threshold (convert from % to decimal)
+    local hasteThreshold = (DjLustDB.hasteThreshold or 25) / 100
     local hasteIncrease = (currentHaste - baselineHaste) / 100
     
-    if hasteIncrease >= HASTE_THRESHOLD and not isLusted then
+    if hasteIncrease >= hasteThreshold and not isLusted then
         isLusted = true
         bloodlustCooldown = BLOODLUST_COOLDOWN
         PlayDjLust()
         return true
     end
     
-    if hasteIncrease < (HASTE_THRESHOLD / 2) and isLusted then
+    if hasteIncrease < (hasteThreshold / 2) and isLusted then
         isLusted = false
         baselineHaste = currentHaste
         bloodlustCooldown = 0
@@ -356,14 +358,14 @@ SlashCmdList["DJLUST"] = function(msg)
         print("  Music file:", currentTheme.music)
         print("  Animation file:", currentTheme.animation)
         print("  Volume:", math.floor(DjLustDB.volume * 100) .. "%")
-        print("  Haste threshold:", (HASTE_THRESHOLD * 100) .. "%")
+        print("  Haste threshold:", (DjLustDB.hasteThreshold or 25) .. "%")
         print("  Check interval:", CHECK_INTERVAL .. "s")
         print("\nAvailable themes:")
         for key, theme in pairs(THEMES) do
             local marker = (key == DjLustDB.theme) and " [ACTIVE]" or ""
             print("  " .. key .. ": " .. theme.name .. marker)
         end
-        print("\nTo change theme, use /djlust settings")
+        print("\nTo change settings, use /djlust settings")
     elseif msg:match("^debug") then
         local arg = msg:match("^debug%s*(%S*)")
         if arg == "on" then
