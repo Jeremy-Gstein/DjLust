@@ -110,6 +110,9 @@ local function CreateSettingsWindow()
     f:SetScript("OnDragStart", f.StartMoving)
     f:SetScript("OnDragStop", f.StopMovingOrSizing)
     f:SetClampedToScreen(true)
+
+    -- Register with Escape key system
+    tinsert(UISpecialFrames, "DjLustSettingsFrame")
     
     -- Backdrop
     f:SetBackdrop({
