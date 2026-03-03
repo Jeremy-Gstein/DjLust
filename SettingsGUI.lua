@@ -29,6 +29,8 @@ local function EnsureDBDefaults()
     DjLustDB.hasteThreshold = DjLustDB.hasteThreshold or 25  -- Default 25%
     DjLustDB.soundChannel = DjLustDB.soundChannel or "Dialog"
     DjLustDB.muteSound = DjLustDB.muteSound or false
+    if not DjLustDB.minimap then DjLustDB.minimap = {} end
+    if DjLustDB.minimap.hide == nil then DjLustDB.minimap.hide = false end
 end
 
 --------------------------------------------------
@@ -73,6 +75,9 @@ local function UpdateUIValues(f)
     end
     if ui.muteCheck then
         ui.muteCheck:SetChecked(DjLustDB.muteSound)
+    end
+    if ui.minimapCheck then
+        ui.minimapCheck:SetChecked(not DjLustDB.minimap.hide)
     end
     -- Sound channel radios
     if ui.channelRadios then
@@ -507,10 +512,45 @@ local function CreateSettingsWindow()
     end)
     f.uiElements.muteCheck = muteCheck
     yOffset = yOffset - 35
-    local actionHeader = content:CreateFontString(nil, "OVERLAY", "GameFontNormalLarge")
-    actionHeader:SetPoint("TOPLEFT", 20, yOffset)
-    actionHeader:SetText("|cffff8800Quick Actions|r")
+
+    --------------------------------------------------
+    -- Minimap Section Header
+    --------------------------------------------------
+    local minimapHeader = content:CreateFontString(nil, "OVERLAY", "GameFontNormalLarge")
+    minimapHeader:SetPoint("TOPLEFT", 20, yOffset)
+    minimapHeader:SetText("|cffff8800Minimap|r")
     yOffset = yOffset - 30
+
+    local minimapCheck = CreateFrame("CheckButton", nil, content, "UICheckButtonTemplate")
+    minimapCheck:SetPoint("TOPLEFT", 25, yOffset)
+    minimapCheck.text:SetText("Show Minimap Button")
+    minimapCheck:SetChecked(not DjLustDB.minimap.hide)
+    minimapCheck:SetScript("OnClick", function(self)
+        local show = self:GetChecked()
+        DjLustDB.minimap.hide = not show
+        local btn = _G["DjLust_MinimapButton"]
+        if show then
+            if btn then
+                btn:Show()
+                btn:SetAlpha(btn.snapped and 0.01 or 1)
+            elseif addon.CreateMinimapButton then
+                addon.CreateMinimapButton()
+            end
+            print("|cff00bfff[DjLust]|r Minimap button |cff00ff00shown|r.")
+        else
+            if btn then btn:Hide() end
+            print("|cff00bfff[DjLust]|r Minimap button |cffff0000hidden|r.")
+        end
+        -- Keep the WoW Options panel checkbox in sync
+        if _G["DjLustOptionsMinimapCheck"] then
+            _G["DjLustOptionsMinimapCheck"]:SetChecked(show)
+        end
+    end)
+    f.uiElements.minimapCheck = minimapCheck
+    yOffset = yOffset - 35
+
+    --------------------------------------------------
+    -- Quick Actions Section
     
     -- Button helper
     local function CreateActionButton(parent, x, y, width, text, onClick)
@@ -667,8 +707,217 @@ function addon:HideSettings()
 end
 
 --------------------------------------------------
--- Slash Command
+-- WoW Options > AddOns Panel
+-- Shows a "Show Minimap Button" checkbox and an
+-- "Open DjLust Settings" button directly in the
+-- built-in Options screen so users can always reach
+-- the addon even with the minimap button hidden.
 --------------------------------------------------
+local function RegisterOptionsPanel()
+    local panel = CreateFrame("Frame")
+    panel.name = "DjLust"
+
+    -- Layout constants
+    local LX   = 16    -- left margin (x)
+    local RX   = 300   -- right column start (footer two-col)
+    local CMDX = 220   -- description column for commands
+    local W    = 550   -- total usable width
+
+    -- All elements use absolute TOPLEFT anchors off the panel.
+    -- 'y' is always negative (distance from panel top).
+    local y = 0
+
+    local function Fs(template, text, x, yExtra)
+        local fs = panel:CreateFontString(nil, "ARTWORK", template)
+        fs:SetPoint("TOPLEFT", panel, "TOPLEFT", x or LX, y + (yExtra or 0))
+        fs:SetJustifyH("LEFT")
+        fs:SetText(text)
+        return fs
+    end
+    local function Skip(px)  y = y - px  end
+    local function Div()
+        local d = panel:CreateTexture(nil, "ARTWORK")
+        d:SetSize(W, 1)
+        d:SetPoint("TOPLEFT", panel, "TOPLEFT", LX, y)
+        d:SetColorTexture(0.35, 0.35, 0.35, 0.8)
+    end
+
+    --------------------------------------------------
+    -- Header
+    --------------------------------------------------
+    Skip(16)
+    Fs("GameFontNormalLarge", "|cff00bfffDjLust|r")
+    Skip(22)
+    Fs("GameFontHighlightSmall",
+        "Plays music and animation when Bloodlust / Heroism is detected via haste spike.")
+    Skip(14)
+    Div() ; Skip(4)
+
+    --------------------------------------------------
+    -- Minimap checkbox
+    --------------------------------------------------
+    Skip(12)
+    local check = CreateFrame("CheckButton", "DjLustOptionsMinimapCheck", panel,
+        "InterfaceOptionsCheckButtonTemplate")
+    check:SetPoint("TOPLEFT", panel, "TOPLEFT", LX - 2, y + 2)
+    check.Text:SetText("Show Minimap Button")
+    check.tooltipText = "Show or hide the DjLust minimap icon. Saved across sessions."
+    check:SetScript("OnClick", function(self)
+        local show = self:GetChecked()
+        DjLustDB.minimap.hide = not show
+        local mapBtn = _G["DjLust_MinimapButton"]
+        if show then
+            if mapBtn then
+                mapBtn:Show()
+                mapBtn:SetAlpha(mapBtn.snapped and 0.01 or 1)
+            elseif addon.CreateMinimapButton then
+                addon.CreateMinimapButton()
+            end
+            print("|cff00bfff[DjLust]|r Minimap button |cff00ff00shown|r.")
+        else
+            if mapBtn then mapBtn:Hide() end
+            print("|cff00bfff[DjLust]|r Minimap button |cffff0000hidden|r.")
+        end
+        local sw = _G["DjLustSettingsFrame"]
+        if sw and sw.uiElements and sw.uiElements.minimapCheck then
+            sw.uiElements.minimapCheck:SetChecked(show)
+        end
+    end)
+
+    -- Button sits on the same row as the checkbox, right-side of panel
+    local openBtn = CreateFrame("Button", nil, panel, "UIPanelButtonTemplate")
+    openBtn:SetSize(190, 26)
+    openBtn:SetPoint("TOPLEFT", panel, "TOPLEFT", RX, y)
+    openBtn:SetText("Open DjLust Settings")
+    openBtn:SetScript("OnClick", function()
+        HideUIPanel(SettingsPanel or InterfaceOptionsFrame)
+        addon:ShowSettings()
+    end)
+    Skip(34)
+
+    Div() ; Skip(4)
+
+    --------------------------------------------------
+    -- Slash Commands  (two fixed columns)
+    --------------------------------------------------
+    Skip(12)
+    Fs("GameFontNormal", "|cffff8800Slash Commands|r")
+    Skip(18)
+
+    local COMMANDS = {
+        { "/djlust",                "Show all available commands"              },
+        { "/djlust settings",       "Open the settings window"                 },
+        { "/djlust test",           "Test music and animation playback"        },
+        { "/djlust stop",           "Stop music and animation"                 },
+        { "/djlust status",         "Show current detection status"            },
+        { "/djlust reset",          "Reset haste baseline"                     },
+        { "/djlust volume <0-100>", "Set volume  (e.g. /djlust volume 80)"     },
+        { "/djlust minimap",        "Toggle minimap button on/off"             },
+        { "/djlust minimap lock",   "Lock minimap button  (prevent dragging)"  },
+        { "/djlust minimap reset",  "Reset minimap to default position"        },
+    }
+
+    for _, row in ipairs(COMMANDS) do
+        local cmd = panel:CreateFontString(nil, "ARTWORK", "GameFontHighlightSmall")
+        cmd:SetPoint("TOPLEFT", panel, "TOPLEFT", LX + 4, y)
+        cmd:SetJustifyH("LEFT")
+        cmd:SetWidth(CMDX - LX - 8)
+        cmd:SetText("|cffffe066" .. row[1] .. "|r")
+
+        local desc = panel:CreateFontString(nil, "ARTWORK", "GameFontHighlightSmall")
+        desc:SetPoint("TOPLEFT", panel, "TOPLEFT", CMDX, y)
+        desc:SetJustifyH("LEFT")
+        desc:SetWidth(W - CMDX)
+        desc:SetText("|cffaaaaaa" .. row[2] .. "|r")
+
+        Skip(15)
+    end
+
+    Skip(4)
+    Div() ; Skip(4)
+
+    --------------------------------------------------
+    -- Adding Custom Songs
+    -- Left col (LX..STEPX): "N.  Step text"
+    -- Right col (STEPX..W): example / note
+    -- STEPX is wider than CMDX so step text never wraps
+    --------------------------------------------------
+    Skip(12)
+    Fs("GameFontNormal", "|cffff8800Adding Custom Songs|r")
+    Skip(18)
+
+    local STEPX = 290   -- split point for this section only
+
+    -- { "N.  Short step text",  "right-side example/note or ''" }
+    local STEPS = {
+        { "|cffffe0661.|r  Navigate to your WoW folder.",              "|cffaaaaaaExample: ...\\World of Warcraft\\_retail_\\|r"          },
+        { "|cffffe0662.|r  Open  |cffffffff Interface\\AddOns\\|r",    ""                                                                  },
+        { "|cffffe0663.|r  Create a folder named  |cff00ff00Songs|r",  "|cffaaaaaaInterface\\AddOns\\Songs\\|r"                            },
+        { "|cffffe0664.|r  Copy your  |cffffffff .mp3|r  files into  |cff00ff00Songs|r", ""                                                },
+        { "|cffffe0665.|r  Edit  |cffffffff DjLust\\CustomSongs.lua|r", "Add to  |cff00ff00CUSTOM_SONGS|r:  |cffaaaaaa{ \"mysong.mp3\" }|r" },
+        { "|cffffe0666.|r  Type  |cffffffff /reload|r  in-game.",       ""                                                                  },
+        { "|cffffe0667.|r  In Settings pick  |cff00ff00Custom Song|r",  "Select your song from the dropdown.  Done!"                       },
+    }
+
+    for i, row in ipairs(STEPS) do
+        local left = panel:CreateFontString(nil, "ARTWORK", "GameFontHighlightSmall")
+        left:SetPoint("TOPLEFT", panel, "TOPLEFT", LX + 4, y)
+        left:SetJustifyH("LEFT")
+        left:SetWidth(STEPX - LX - 8)
+        left:SetText(row[1])
+
+        if row[2] ~= "" then
+            local right = panel:CreateFontString(nil, "ARTWORK", "GameFontHighlightSmall")
+            right:SetPoint("TOPLEFT", panel, "TOPLEFT", STEPX, y)
+            right:SetJustifyH("LEFT")
+            right:SetWidth(W - STEPX)
+            right:SetText(row[2])
+        end
+
+        Skip(15)
+
+        -- Thin separator between steps, not after the last
+        if i < #STEPS then
+            local sep = panel:CreateTexture(nil, "ARTWORK")
+            sep:SetSize(W - LX * 2, 1)
+            sep:SetPoint("TOPLEFT", panel, "TOPLEFT", LX, y)
+            sep:SetColorTexture(0.25, 0.25, 0.25, 0.6)
+            Skip(5)
+        end
+    end
+
+    Div() ; Skip(4)
+
+    --------------------------------------------------
+    -- Footer  (two side-by-side columns)
+    --------------------------------------------------
+    Skip(90)
+
+    -- Left column: GitHub
+    Fs("GameFontHighlightSmall", "|cffff8800 GitHub  (issues,bugs, and feature requests):|r", LX)
+    Fs("GameFontHighlightSmall", "|cffff8800 Seems Good Community:|r",          RX)
+    Skip(16)
+    Fs("GameFontHighlightSmall", "|cff00bfffhttps://github.com/Jeremy-Gstein/DjLust|r", LX + 4)
+    Fs("GameFontHighlightSmall", "|cff00bfffhttps://seemsgood.org|r",                    RX + 4)
+
+    --------------------------------------------------
+    -- Refresh on show
+    --------------------------------------------------
+    panel:SetScript("OnShow", function()
+        EnsureDBDefaults()
+        check:SetChecked(not DjLustDB.minimap.hide)
+    end)
+
+    --------------------------------------------------
+    -- Register
+    --------------------------------------------------
+    if Settings and Settings.RegisterCanvasLayoutCategory then
+        local category = Settings.RegisterCanvasLayoutCategory(panel, panel.name)
+        Settings.RegisterAddOnCategory(category)
+    else
+        InterfaceOptions_AddCategory(panel)
+    end
+end
 SLASH_DJLSETTINGS1 = "/djlsettings"
 SlashCmdList["DJLSETTINGS"] = function()
     addon:ToggleSettings()
@@ -682,6 +931,7 @@ frame:SetScript("OnEvent", function(self, event, loadedAddon)
         -- CRITICAL FIX: Wait for DjLust.lua to initialize DjLustDB first
         C_Timer.After(0.1, function()
             EnsureDBDefaults()
+            RegisterOptionsPanel()
             
             -- Apply saved settings
             if DjLustDB.debugMode then
