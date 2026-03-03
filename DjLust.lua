@@ -325,22 +325,14 @@ local function CheckHasteForBloodlust()
     return isLusted
 end
 
--- Start haste monitoring
+-- Start haste monitoring (combat only)
 local function StartHasteMonitoring()
     if hasteCheckTimer then
         hasteCheckTimer:Cancel()
         hasteCheckTimer = nil
     end
-    
-    hasteCheckTimer = C_Timer.NewTicker(CHECK_INTERVAL, function()
-        if InCombatLockdown() then
-            CheckHasteForBloodlust()
-        else
-            if not isLusted then
-                baselineHaste = GetCurrentHaste()
-            end
-        end
-    end)
+
+    hasteCheckTimer = C_Timer.NewTicker(CHECK_INTERVAL, CheckHasteForBloodlust)
 end
 
 -- Stop haste monitoring
@@ -386,10 +378,14 @@ frame:SetScript("OnEvent", function(self, event, ...)
     if event == "PLAYER_ENTERING_WORLD" then
         printDebug("DjLust loaded - Theme: ", DjLustDB.theme or "chipi")
         baselineHaste = GetCurrentHaste()
-        StartHasteMonitoring()
+        -- No ticker on load - will start when combat begins
     elseif event == "PLAYER_REGEN_DISABLED" then
+        -- Entering combat: snapshot baseline and start polling
         baselineHaste = GetCurrentHaste()
+        StartHasteMonitoring()
     elseif event == "PLAYER_REGEN_ENABLED" then
+        -- Leaving combat: stop polling immediately (0 CPU while idle)
+        StopHasteMonitoring()
         if isLusted then
             isLusted = false
             StopDjLust()
