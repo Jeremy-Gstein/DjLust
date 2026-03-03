@@ -9,6 +9,8 @@ DjLustDB.volume = DjLustDB.volume or 1.0
 DjLustDB.theme = DjLustDB.theme or "chipi"
 DjLustDB.customSong = DjLustDB.customSong or ""
 DjLustDB.hasteThreshold = DjLustDB.hasteThreshold or 25  -- Default 25%
+DjLustDB.soundChannel = DjLustDB.soundChannel or "Dialog"
+DjLustDB.muteSound = DjLustDB.muteSound or false
 
 -- Theme configurations
 local THEMES = {
@@ -42,8 +44,36 @@ local lastPlayTime = 0
 local PLAY_COOLDOWN = 0.5  -- Prevent rapid-fire plays
 
 -- CVar caching 
-local originalDialogVolume = nil
+local originalChannelVolume = nil
 local cvarDirty = false
+
+-- Sound channel -> CVar mapping
+local CHANNEL_CVARS = {
+    Master   = "Sound_MasterVolume",
+    SFX      = "Sound_SFXVolume",
+    Dialog   = "Sound_DialogVolume",
+    Music    = "Sound_MusicVolume",
+    Ambience = "Sound_AmbienceVolume",
+}
+
+-- Returns true + reason string if the given channel (or master) is muted/zero
+local function IsChannelEffectivelyMuted(channel)
+    if GetCVar("Sound_EnableAllSound") == "0" then
+        return true, "all sound is globally disabled"
+    end
+    local masterVol = tonumber(GetCVar("Sound_MasterVolume")) or 0
+    if masterVol <= 0 then
+        return true, "master volume is 0"
+    end
+    local cvarName = CHANNEL_CVARS[channel]
+    if cvarName then
+        local vol = tonumber(GetCVar(cvarName)) or 0
+        if vol <= 0 then
+            return true, (channel .. " channel volume is 0")
+        end
+    end
+    return false, nil
+end
 
 -- Configuration
 local CHECK_INTERVAL = 0.5
@@ -104,12 +134,14 @@ local function CleanupSoundHandles()
 end
 
 -- Restore CVar only when needed
-local function RestoreDialogVolume()
-    if cvarDirty and originalDialogVolume then
-        SetCVar("Sound_DialogVolume", tostring(originalDialogVolume))
+local function RestoreChannelVolume()
+    if cvarDirty and originalChannelVolume then
+        local channel = DjLustDB.soundChannel or "Dialog"
+        local cvarName = CHANNEL_CVARS[channel] or "Sound_DialogVolume"
+        SetCVar(cvarName, tostring(originalChannelVolume))
         cvarDirty = false
-        originalDialogVolume = nil
-        printDebug("Dialog volume restored")
+        originalChannelVolume = nil
+        printDebug("Channel volume restored for", channel)
     end
 end
 
@@ -122,51 +154,74 @@ local function PlayDjLust()
         return
     end
     lastPlayTime = now
-    
+
     -- Stop any currently playing music and cleanup handles
     StopMusic()
     CleanupSoundHandles()
-    
-    -- Get volume from settings
-    local volume = (DjLustDB and DjLustDB.volume) or 1.0
-    
-    -- Get music file from current theme
-    local musicFile = GetMusicFile()
-    
-    -- Play the sound
-    if type(musicFile) == "number" then
-        PlaySound(musicFile, "Dialog")
-        printDebug("Playing default sound!")
-    else
-        -- Cache original volume only once
-        if not originalDialogVolume then
-            originalDialogVolume = tonumber(GetCVar("Sound_DialogVolume")) or 1.0
+
+    -- ── ANIMATION ────────────────────────────────────────────────────────────
+    -- Always start animation first, regardless of sound outcome.
+    if DjLustDB.animationEnabled ~= false then
+        if addon.StartAnimation then
+            addon:StartAnimation()
         end
-        
-        -- Only set CVar if it's actually different (reduce CVar spam)
+    end
+
+    -- ── SOUND ────────────────────────────────────────────────────────────────
+    -- Respect the addon-level mute flag
+    if DjLustDB.muteSound then
+        printDebug("Sound muted by user preference - animation only")
+        return
+    end
+
+    local channel = DjLustDB.soundChannel or "Dialog"
+    local musicFile = GetMusicFile()
+
+    -- Check whether the WoW sound channel is actually audible
+    local isMuted, muteReason = IsChannelEffectivelyMuted(channel)
+    if isMuted then
+        print(string.format(
+            "|cff00bfff[DjLust]|r |cffff8800[!] Cannot play music:|r %s.\n"
+            .. "  Open |cffff8800/djlust settings|r to pick a different channel or mute sound intentionally.",
+            muteReason
+        ))
+        return
+    end
+
+    local volume = (DjLustDB and DjLustDB.volume) or 1.0
+
+    if type(musicFile) == "number" then
+        PlaySound(musicFile, channel)
+        printDebug("Playing default sound on channel:", channel)
+    else
+        local cvarName = CHANNEL_CVARS[channel] or "Sound_DialogVolume"
+
+        -- Cache original volume for restoration
+        if not originalChannelVolume then
+            originalChannelVolume = tonumber(GetCVar(cvarName)) or 1.0
+        end
+
+        -- Only set CVar if actually different
         local targetVolume = tostring(volume)
-        local currentVolume = GetCVar("Sound_DialogVolume")
-        if currentVolume ~= targetVolume then
-            SetCVar("Sound_DialogVolume", targetVolume)
+        if GetCVar(cvarName) ~= targetVolume then
+            SetCVar(cvarName, targetVolume)
             cvarDirty = true
         end
-        
-        -- Play the music file
-        local willPlay, soundHandle = PlaySoundFile(musicFile, "Dialog")
+
+        local willPlay, soundHandle = PlaySoundFile(musicFile, channel)
         if willPlay then
-            -- Store in pool (max 1 handle)
             soundHandlePool[1] = soundHandle
-            
             local themeName = THEMES[DjLustDB.theme] and THEMES[DjLustDB.theme].name or "Unknown"
-            printDebug("Now playing: ", themeName, " at volume ", math.floor(volume * 100), "%")
-            
-            -- Trigger animation
-            if addon.StartAnimation then
-                addon:StartAnimation()
-            end
+            printDebug("Now playing:", themeName, "on channel:", channel, "at volume", math.floor(volume * 100), "%")
         else
-            printDebug("Failed to play music file: ", musicFile)
-            RestoreDialogVolume()
+            -- Music failed but animation is already running – just warn.
+            print(string.format(
+                "|cff00bfff[DjLust]|r |cffff8800[!] Failed to load music file.|r "
+                .. "Check the file exists and the |cffff8800%s|r channel isn't muted. "
+                .. "Use |cffff8800/djlust settings|r to change channel.",
+                channel
+            ))
+            RestoreChannelVolume()
         end
     end
 end
@@ -177,7 +232,7 @@ local function StopDjLust()
     CleanupSoundHandles()
     
     -- Restore volume
-    RestoreDialogVolume()
+    RestoreChannelVolume()
     
     -- Stop animation
     if addon.StopAnimation then
@@ -189,10 +244,36 @@ end
 
 -- Update volume for currently playing music
 function addon:UpdateVolume(volume)
-    if soundHandlePool[1] and originalDialogVolume then
-        SetCVar("Sound_DialogVolume", tostring(volume))
+    if soundHandlePool[1] and originalChannelVolume then
+        local channel = DjLustDB.soundChannel or "Dialog"
+        local cvarName = CHANNEL_CVARS[channel] or "Sound_DialogVolume"
+        SetCVar(cvarName, tostring(volume))
         cvarDirty = true
-        printDebug("Volume updated to ", math.floor(volume * 100), "%")
+        printDebug("Volume updated to", math.floor(volume * 100), "%")
+    end
+end
+
+-- Change which WoW sound channel music plays on
+function addon:SetSoundChannel(channel)
+    if CHANNEL_CVARS[channel] then
+        -- Restore old channel before switching
+        RestoreChannelVolume()
+        DjLustDB.soundChannel = channel
+        printDebug("Sound channel set to:", channel)
+    else
+        print("|cff00bfff[DjLust]|r Invalid channel. Valid options: Master, SFX, Dialog, Music, Ambience")
+    end
+end
+
+-- Toggle addon-level sound mute (animation still plays)
+function addon:SetMuteSound(muted)
+    DjLustDB.muteSound = muted
+    if muted then
+        CleanupSoundHandles()
+        RestoreChannelVolume()
+        print("|cff00bfff[DjLust]|r Sound |cffff0000muted|r - animation will still play.")
+    else
+        print("|cff00bfff[DjLust]|r Sound |cff00ff00enabled|r.")
     end
 end
 

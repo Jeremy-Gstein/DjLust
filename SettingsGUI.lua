@@ -27,6 +27,8 @@ local function EnsureDBDefaults()
     DjLustDB.animationX = DjLustDB.animationX or 0
     DjLustDB.animationY = DjLustDB.animationY or 0
     DjLustDB.hasteThreshold = DjLustDB.hasteThreshold or 25  -- Default 25%
+    DjLustDB.soundChannel = DjLustDB.soundChannel or "Dialog"
+    DjLustDB.muteSound = DjLustDB.muteSound or false
 end
 
 --------------------------------------------------
@@ -68,6 +70,15 @@ local function UpdateUIValues(f)
     if ui.hasteSlider and ui.hasteLabel then
         ui.hasteSlider:SetValue(DjLustDB.hasteThreshold)
         ui.hasteLabel:SetText("Haste Threshold: " .. DjLustDB.hasteThreshold .. "%")
+    end
+    if ui.muteCheck then
+        ui.muteCheck:SetChecked(DjLustDB.muteSound)
+    end
+    -- Sound channel radios
+    if ui.channelRadios then
+        for ch, btn in pairs(ui.channelRadios) do
+            btn:SetChecked(DjLustDB.soundChannel == ch)
+        end
     end
 end
 
@@ -437,10 +448,62 @@ local function CreateSettingsWindow()
     f.uiElements.volumeSlider = volumeSlider
     f.uiElements.volumeLabel = volumeLabel
     yOffset = yOffset - 35
-    
+
     --------------------------------------------------
-    -- Quick Actions Section
+    -- Sound Channel Selection
     --------------------------------------------------
+    local channelHeader = content:CreateFontString(nil, "OVERLAY", "GameFontNormal")
+    channelHeader:SetPoint("TOPLEFT", 25, yOffset)
+    channelHeader:SetText("Sound Channel:")
+    yOffset = yOffset - 20
+
+    local channelHelp = content:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
+    channelHelp:SetPoint("TOPLEFT", 25, yOffset)
+    channelHelp:SetText("|cff808080If music is silent, try a different channel (Dialog is default)|r")
+    yOffset = yOffset - 22
+
+    -- Channel radio buttons (two rows)
+    local CHANNELS = { "Dialog", "SFX", "Music", "Master", "Ambience" }
+    local channelRadios = {}
+    local colWidth = 90
+    for i, ch in ipairs(CHANNELS) do
+        local col = (i - 1) % 3
+        local row = math.floor((i - 1) / 3)
+        local radio = CreateFrame("CheckButton", nil, content, "UIRadioButtonTemplate")
+        radio:SetPoint("TOPLEFT", 35 + col * colWidth, yOffset - row * 22)
+        radio.text:SetText(ch)
+        radio:SetChecked(DjLustDB.soundChannel == ch)
+        local capturedCh = ch
+        radio:SetScript("OnClick", function()
+            DjLustDB.soundChannel = capturedCh
+            for _, r in pairs(channelRadios) do r:SetChecked(false) end
+            radio:SetChecked(true)
+            if addon.SetSoundChannel then
+                addon:SetSoundChannel(capturedCh)
+            end
+            print("|cff00bfff[DjLust]|r Sound channel set to: |cffff8800" .. capturedCh .. "|r")
+        end)
+        channelRadios[ch] = radio
+    end
+    f.uiElements.channelRadios = channelRadios
+    yOffset = yOffset - 50  -- two rows of radios
+
+    --------------------------------------------------
+    -- Mute Sound Checkbox
+    --------------------------------------------------
+    local muteCheck = CreateFrame("CheckButton", nil, content, "UICheckButtonTemplate")
+    muteCheck:SetPoint("TOPLEFT", 25, yOffset)
+    muteCheck.text:SetText("Mute Sound (animation still plays)")
+    muteCheck:SetChecked(DjLustDB.muteSound)
+    muteCheck:SetScript("OnClick", function(self)
+        if addon.SetMuteSound then
+            addon:SetMuteSound(self:GetChecked())
+        else
+            DjLustDB.muteSound = self:GetChecked()
+        end
+    end)
+    f.uiElements.muteCheck = muteCheck
+    yOffset = yOffset - 35
     local actionHeader = content:CreateFontString(nil, "OVERLAY", "GameFontNormalLarge")
     actionHeader:SetPoint("TOPLEFT", 20, yOffset)
     actionHeader:SetText("|cffff8800Quick Actions|r")
@@ -560,7 +623,7 @@ local function CreateSettingsWindow()
     --------------------------------------------------
     local info = f:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
     info:SetPoint("BOTTOM", 0, 15)
-    info:SetText("|cff808080Drag animation to reposition • Use /djlust for all commands|r")
+    info:SetText("|cff808080Drag animation to reposition | Use /djlust for all commands|r")
     
     f:Hide()
     settingsFrame = f

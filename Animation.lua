@@ -157,6 +157,14 @@ end
 
 -- Start animation (WITH MEMORY LEAK FIXES)
 function addon:StartAnimation()
+    -- Respect the enable flag set in settings
+    if DjLustDB and DjLustDB.animationEnabled == false then
+        if printDebug then
+            printDebug("|cff00bfff[DjLust]|r Animation disabled in settings, skipping.")
+        end
+        return
+    end
+
     -- DEBOUNCE: Prevent rapid restarts
     local now = GetTime()
     if now - lastAnimStart < ANIM_COOLDOWN then
