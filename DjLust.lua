@@ -11,6 +11,7 @@ DjLustDB.customSong = DjLustDB.customSong or ""
 DjLustDB.hasteThreshold = DjLustDB.hasteThreshold or 25  -- Default 25%
 DjLustDB.soundChannel = DjLustDB.soundChannel or "Dialog"
 DjLustDB.muteSound = DjLustDB.muteSound or false
+if DjLustDB.animationLocked == nil then DjLustDB.animationLocked = false end
 
 -- Theme configurations
 local THEMES = {
@@ -437,6 +438,7 @@ SlashCmdList["DJLUST"] = function(msg)
         print("  Volume:", math.floor(DjLustDB.volume * 100) .. "%")
         print("  Haste threshold:", (DjLustDB.hasteThreshold or 25) .. "%")
         print("  Check interval:", CHECK_INTERVAL .. "s")
+        print("  Animation locked:", DjLustDB.animationLocked and "YES" or "NO")
         print("\nAvailable themes:")
         for key, theme in pairs(THEMES) do
             local marker = (key == DjLustDB.theme) and " [ACTIVE]" or ""

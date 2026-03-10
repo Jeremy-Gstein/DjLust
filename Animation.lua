@@ -54,6 +54,8 @@ animFrame:Hide()
 local animTexture = animFrame:CreateTexture(nil, "ARTWORK")
 animTexture:SetAllPoints(animFrame)
 
+
+
 -- Helper to get current theme safely
 local function GetCurrentTheme()
     if not DjLustDB then
@@ -155,6 +157,13 @@ local function CleanupAnimationGroups()
     UIFrameFadeRemoveFrame(animFrame)
 end
 
+-- Apply the current lock state to the frame (mouse interaction)
+local function ApplyLockState()
+    local locked = DjLustDB and DjLustDB.animationLocked
+    -- Disable/enable mouse so the frame can't be grabbed when locked
+    animFrame:EnableMouse(not locked)
+end
+
 -- Start animation (WITH MEMORY LEAK FIXES)
 function addon:StartAnimation()
     -- Respect the enable flag set in settings
@@ -204,6 +213,9 @@ function addon:StartAnimation()
         end
     end
     
+    -- Reapply lock state every time animation shows (covers /reload and session restore)
+    ApplyLockState()
+
     animState.isPlaying = true
     animState.currentFrame = 0
     animFrame:Show()
@@ -260,15 +272,30 @@ animFrame:SetMovable(true)
 animFrame:EnableMouse(true)
 animFrame:RegisterForDrag("LeftButton")
 animFrame:SetScript("OnDragStart", function(self)
+    -- Respect position lock
+    if DjLustDB and DjLustDB.animationLocked then
+        print("|cff00bfff[DjLust]|r Animation position is locked. Uncheck |cffff8800Lock Position|r in Settings to move it.")
+        return
+    end
     self:StartMoving()
 end)
 animFrame:SetScript("OnDragStop", function(self)
     self:StopMovingOrSizing()
-    local point, _, relativePoint, xOfs, yOfs = self:GetPoint()
+    -- GetPoint() after StopMovingOrSizing can return an offset relative to an
+    -- arbitrary anchor WoW chose during the drag, not UIParent CENTER.
+    -- Calculate the true CENTER-relative offset from raw screen coordinates so
+    -- that StartAnimation always restores to exactly the right spot.
+    local pWidth  = UIParent:GetWidth()
+    local pHeight = UIParent:GetHeight()
+    local x = (self:GetLeft() + self:GetWidth()  / 2) - pWidth  / 2
+    local y = (self:GetBottom() + self:GetHeight() / 2) - pHeight / 2
     if DjLustDB then
-        DjLustDB.animationX = xOfs
-        DjLustDB.animationY = yOfs
+        DjLustDB.animationX = x
+        DjLustDB.animationY = y
     end
+    -- Re-anchor cleanly so the frame's internal anchor is always consistent
+    self:ClearAllPoints()
+    self:SetPoint("CENTER", UIParent, "CENTER", x, y)
 end)
 
 -- Update FPS
@@ -298,6 +325,19 @@ function addon:UpdateAnimationTexture()
     end
 end
 
+-- Lock/unlock animation position
+-- Persists via DjLustDB.animationLocked (saved variable)
+function addon:SetAnimationLocked(locked)
+    DjLustDB.animationLocked = locked
+    ApplyLockState()
+
+    if locked then
+        print("|cff00bfff[DjLust]|r Animation position |cffff0000locked|r.")
+    else
+        print("|cff00bfff[DjLust]|r Animation position |cff00ff00unlocked|r.")
+    end
+end
+
 -- MEMORY LEAK FIX: Comprehensive cleanup
 local function CleanupAnimation()
     animState.isPlaying = false
@@ -322,6 +362,10 @@ SlashCmdList["DJLANIM"] = function(msg)
         else
             addon:StartAnimation()
         end
+    elseif msg == "lock" then
+        addon:SetAnimationLocked(true)
+    elseif msg == "unlock" then
+        addon:SetAnimationLocked(false)
     elseif msg == "info" then
         print("|cff00bfff[DjLust Animation] Info:|r")
         print("  Theme:", GetCurrentTheme())
@@ -330,11 +374,17 @@ SlashCmdList["DJLANIM"] = function(msg)
         print("  Current frame:", animState.currentFrame)
         print("  FPS:", animState.fps)
         print("  Playing:", animState.isPlaying and "Yes" or "No")
+        print("  Position locked:", (DjLustDB and DjLustDB.animationLocked) and "|cffff0000Yes|r" or "|cff00ff00No|r")
         local theme = THEMES[GetCurrentTheme()]
         print("  Texture:", theme.texture)
         print("  Ticker active:", animState.ticker and "Yes" or "No")
         print("  Pending timers:", #pendingTimers)
     elseif msg == "reset" then
+        -- Reset clears the lock so the position can be set freely
+        if DjLustDB and DjLustDB.animationLocked then
+            print("|cff00bfff[DjLust]|r Position was locked - unlocking before reset.")
+            addon:SetAnimationLocked(false)
+        end
         animFrame:ClearAllPoints()
         animFrame:SetPoint("CENTER", UIParent, "CENTER", 0, 0)
         if DjLustDB then
@@ -373,12 +423,14 @@ SlashCmdList["DJLANIM"] = function(msg)
         print("  |cffff1493/djlanim start|r - Start animation")
         print("  |cffff1493/djlanim stop|r - Stop animation")
         print("  |cffff1493/djlanim toggle|r - Toggle animation on/off")
+        print("  |cffff1493/djlanim lock|r - Lock animation position")
+        print("  |cffff1493/djlanim unlock|r - Unlock animation position")
         print("  |cffff1493/djlanim info|r - Show animation info")
-        print("  |cffff1493/djlanim reset|r - Reset position to center")
+        print("  |cffff1493/djlanim reset|r - Reset position to center (also unlocks)")
         print("  |cffff1493/djlanim cleanup|r - Force cleanup")
         print("  |cffff1493/djlanim size <number>|r - Set animation size (32-512)")
         print("  |cffff1493/djlanim fps <number>|r - Set animation speed (1-60)")
-        print("|cff00bfff[TIP]|r Drag the animation with left mouse button to reposition")
+        print("|cff00bfff[TIP]|r Drag the animation with left mouse button to reposition (when unlocked)")
     end
 end
 
@@ -401,6 +453,8 @@ initFrame:SetScript("OnEvent", function(self, event, loadedAddon)
                 animFrame:ClearAllPoints()
                 animFrame:SetPoint("CENTER", UIParent, "CENTER", DjLustDB.animationX, DjLustDB.animationY)
             end
+            -- Restore persisted lock state on load
+            ApplyLockState()
         end
     elseif event == "PLAYER_LOGOUT" then
         CleanupAnimation()
