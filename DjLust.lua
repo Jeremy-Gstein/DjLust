@@ -5,37 +5,32 @@ local addonName, addon = ...
 
 -- Initialize saved variables with defaults
 DjLustDB = DjLustDB or {}
-DjLustDB.volume = DjLustDB.volume or 1.0
-DjLustDB.theme = DjLustDB.theme or "chipi"
-DjLustDB.customSong = DjLustDB.customSong or ""
-DjLustDB.hasteThreshold = DjLustDB.hasteThreshold or 25  -- Default 25%
-DjLustDB.soundChannel = DjLustDB.soundChannel or "Dialog"
-DjLustDB.muteSound = DjLustDB.muteSound or false
-if DjLustDB.animationLocked == nil then DjLustDB.animationLocked = false end
-DjLustDB.partyText = DjLustDB.partyText or "PARTY TIME!"
 
--- Theme configurations
-local THEMES = {
-    chipi = {
-        name      = "Chipi Chipi",
-        music     = "Interface\\AddOns\\DjLust\\chipilust.mp3",
-        animation = "Interface\\AddOns\\DjLust\\chipi.tga",
-    },
-    pedro = {
-        name      = "Pedro",
-        music     = "Interface\\AddOns\\DjLust\\pedrolust.mp3",
-        animation = "Interface\\AddOns\\DjLust\\pedrolust.tga",
-    },
-    custom = {
-        name      = "Custom Song",
-        music     = nil,  -- Set dynamically from DjLustDB.customSong
-        animation = "Interface\\AddOns\\DjLust\\pedrolust.tga",
-    },
-    text = {
-        name      = "Text Display",
-        music     = nil,  -- Set dynamically from DjLustDB.customSong; falls back to chipilust.mp3
-        animation = nil,  -- No sprite; Animation.lua renders partyText instead
-    },
+-- Schema migration from v1 (theme/customSong) to v2 (animationStyle/music)
+if DjLustDB.theme and not DjLustDB.animationStyle then
+    local styleMap = { chipi = "chipi", pedro = "pedro", text = "text", custom = "chipi" }
+    DjLustDB.animationStyle = styleMap[DjLustDB.theme] or "chipi"
+    if DjLustDB.customSong and DjLustDB.customSong ~= "" then
+        DjLustDB.music = DjLustDB.customSong
+    end
+    DjLustDB.theme      = nil
+    DjLustDB.customSong = nil
+end
+if DjLustDB.animationEnabled ~= nil then DjLustDB.animationEnabled = nil end
+
+DjLustDB.animationStyle = DjLustDB.animationStyle or "chipi"
+DjLustDB.music          = DjLustDB.music          or ""
+DjLustDB.partyText      = DjLustDB.partyText      or "PARTY TIME!"
+DjLustDB.volume         = DjLustDB.volume         or 1.0
+DjLustDB.soundChannel   = DjLustDB.soundChannel   or "Dialog"
+DjLustDB.muteSound      = DjLustDB.muteSound      or false
+DjLustDB.hasteThreshold = DjLustDB.hasteThreshold or 25
+if DjLustDB.animationLocked == nil then DjLustDB.animationLocked = false end
+
+-- Built-in music file paths
+local BUILTIN_MUSIC = {
+    chipi = "Interface\\AddOns\\DjLust\\chipilust.mp3",
+    pedro = "Interface\\AddOns\\DjLust\\pedrolust.mp3",
 }
 
 -- Track state
@@ -86,25 +81,14 @@ end
 local CHECK_INTERVAL = 0.5
 local BLOODLUST_COOLDOWN = 30
 
--- Get current theme's music file
+-- Get current music file path
 local function GetMusicFile()
-    local theme = THEMES[DjLustDB.theme] or THEMES.chipi
-
-    -- custom and text themes both use the full path stored in DjLustDB.customSong
-    if DjLustDB.theme == "custom" or DjLustDB.theme == "text" then
-        if DjLustDB.customSong and DjLustDB.customSong ~= "" then
-            return DjLustDB.customSong  -- already a full path
-        end
-        if DjLustDB.theme == "text" then
-            -- Default music for text display: chipilust from the addon folder
-            printDebug("Text theme: no song selected, falling back to chipilust.mp3")
-            return "Interface\\AddOns\\DjLust\\chipilust.mp3"
-        end
-        printDebug("Custom theme selected but no song chosen, using default")
-        return THEMES.chipi.music
+    -- User-selected song takes priority (full path already stored)
+    if DjLustDB.music and DjLustDB.music ~= "" then
+        return DjLustDB.music
     end
-
-    return theme.music
+    -- Default: chipi song
+    return BUILTIN_MUSIC.chipi
 end
 
 -- Debug print helper
@@ -156,7 +140,52 @@ local function RestoreChannelVolume()
     end
 end
 
--- Play bloodlust music 
+-- Play music only (no animation) — used by the Test Music button
+function addon:TestMusic()
+    local now = GetTime()
+    if now - lastPlayTime < PLAY_COOLDOWN then return end
+    lastPlayTime = now
+
+    StopMusic()
+    CleanupSoundHandles()
+
+    if DjLustDB.muteSound then
+        print("|cff00bfff[DjLust]|r Sound is muted.")
+        return
+    end
+
+    local channel   = DjLustDB.soundChannel or "Dialog"
+    local musicFile = GetMusicFile()
+
+    local isMuted, muteReason = IsChannelEffectivelyMuted(channel)
+    if isMuted then
+        print("|cff00bfff[DjLust]|r |cffff8800[!] Cannot play music:|r " .. muteReason)
+        return
+    end
+
+    local volume  = DjLustDB.volume or 1.0
+    local cvarName = CHANNEL_CVARS[channel] or "Sound_DialogVolume"
+    if not originalChannelVolume then
+        originalChannelVolume = tonumber(GetCVar(cvarName)) or 1.0
+    end
+    local targetVolume = tostring(volume)
+    if GetCVar(cvarName) ~= targetVolume then
+        SetCVar(cvarName, targetVolume)
+        cvarDirty = true
+    end
+
+    local willPlay, soundHandle = PlaySoundFile(musicFile, channel)
+    if willPlay then
+        soundHandlePool[1] = soundHandle
+        print("|cff00bfff[DjLust]|r Testing music: " .. musicFile)
+    else
+        print("|cff00bfff[DjLust]|r |cffff8800[!] Failed to play:|r " .. musicFile)
+        RestoreChannelVolume()
+    end
+end
+
+
+-- Play bloodlust music and animation
 local function PlayDjLust()
     -- DEBOUNCE: Prevent rapid-fire calls
     local now = GetTime()
@@ -172,7 +201,7 @@ local function PlayDjLust()
 
     -- ── ANIMATION ────────────────────────────────────────────────────────────
     -- Always start animation first, regardless of sound outcome.
-    if DjLustDB.animationEnabled ~= false then
+    if DjLustDB.animationStyle ~= "none" then
         if addon.StartAnimation then
             addon:StartAnimation()
         end
@@ -222,8 +251,7 @@ local function PlayDjLust()
         local willPlay, soundHandle = PlaySoundFile(musicFile, channel)
         if willPlay then
             soundHandlePool[1] = soundHandle
-            local themeName = THEMES[DjLustDB.theme] and THEMES[DjLustDB.theme].name or "Unknown"
-            printDebug("Now playing:", themeName, "on channel:", channel, "at volume", math.floor(volume * 100), "%")
+            printDebug("Now playing:", musicFile, "on channel:", channel, "at volume", math.floor(volume * 100), "%")
         else
             -- Music failed but animation is already running – just warn.
             print(string.format(
@@ -237,20 +265,19 @@ local function PlayDjLust()
     end
 end
 
--- Stop bloodlust music 
+-- Stop bloodlust music (internal: stops both music and animation when lust ends)
 local function StopDjLust()
-    -- Stop and cleanup all sound handles
     CleanupSoundHandles()
-    
-    -- Restore volume
     RestoreChannelVolume()
-    
-    -- Stop animation
-    if addon.StopAnimation then
-        addon:StopAnimation()
-    end
-    
+    if addon.StopAnimation then addon:StopAnimation() end
     printDebug("Music stopped - Bloodlust ended")
+end
+
+-- Stop music only (used by the Stop Music button — leaves animation running)
+function addon:StopMusic()
+    CleanupSoundHandles()
+    RestoreChannelVolume()
+    printDebug("Music stopped by user")
 end
 
 -- Update volume for currently playing music
@@ -288,16 +315,17 @@ function addon:SetMuteSound(muted)
     end
 end
 
--- Update theme
-function addon:UpdateTheme(theme)
-    if THEMES[theme] then
-        DjLustDB.theme = theme
-        printDebug("Theme updated to: ", THEMES[theme].name)
-        
-        if addon.UpdateAnimationTexture then
-            addon:UpdateAnimationTexture()
-        end
+-- Update animation style
+function addon:UpdateTheme(style)
+    DjLustDB.animationStyle = style
+    if addon.UpdateAnimationTexture then
+        addon:UpdateAnimationTexture()
     end
+end
+
+-- Update selected music
+function addon:UpdateMusic(path)
+    DjLustDB.music = path
 end
 
 -- Check for sudden haste increase
@@ -387,7 +415,7 @@ frame:RegisterEvent("PLAYER_REGEN_ENABLED")
 frame:RegisterEvent("PLAYER_LOGOUT")
 frame:SetScript("OnEvent", function(self, event, ...)
     if event == "PLAYER_ENTERING_WORLD" then
-        printDebug("DjLust loaded - Theme: ", DjLustDB.theme or "chipi")
+        printDebug("DjLust loaded - Style:", DjLustDB.animationStyle or "chipi")
         baselineHaste = GetCurrentHaste()
         -- No ticker on load - will start when combat begins
     elseif event == "PLAYER_REGEN_DISABLED" then
@@ -413,12 +441,12 @@ SLASH_DJLUST1 = "/djl"
 SLASH_DJLUST2 = "/djlust"
 SlashCmdList["DJLUST"] = function(msg)
     if msg == "test" then
-        local themeName = THEMES[DjLustDB.theme] and THEMES[DjLustDB.theme].name or "Unknown"
-        print("[DjLust] [TEST] Testing music playback with theme: " .. themeName)
+        local style = DjLustDB.animationStyle or "chipi"
+        print("[DjLust] [TEST] Testing playback (style: " .. style .. ")")
         PlayDjLust()
     elseif msg == "stop" then
         print("[DjLust] [STOP] Stopping music...")
-        StopDjLust()
+        addon:StopMusic()
         isLusted = false
         bloodlustCooldown = 0
     elseif msg == "status" then
@@ -441,19 +469,12 @@ SlashCmdList["DJLUST"] = function(msg)
         StopDjLust()
     elseif msg == "config" then
         print("[DjLust] [CONFIG]\nConfiguration:")
-        local currentTheme = THEMES[DjLustDB.theme] or THEMES.chipi
-        print("  Current theme:", currentTheme.name)
-        print("  Music file:", currentTheme.music)
-        print("  Animation file:", currentTheme.animation)
+        print("  Animation style:", DjLustDB.animationStyle or "chipi")
+        print("  Music:", (DjLustDB.music ~= "") and DjLustDB.music or "(default: chipilust.mp3)")
         print("  Volume:", math.floor(DjLustDB.volume * 100) .. "%")
         print("  Haste threshold:", (DjLustDB.hasteThreshold or 25) .. "%")
         print("  Check interval:", CHECK_INTERVAL .. "s")
         print("  Animation locked:", DjLustDB.animationLocked and "YES" or "NO")
-        print("\nAvailable themes:")
-        for key, theme in pairs(THEMES) do
-            local marker = (key == DjLustDB.theme) and " [ACTIVE]" or ""
-            print("  " .. key .. ": " .. theme.name .. marker)
-        end
         print("\nTo change settings, use /djlust settings")
     elseif msg:match("^debug") then
         local arg = msg:match("^debug%s*(%S*)")

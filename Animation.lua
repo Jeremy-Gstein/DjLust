@@ -1,9 +1,8 @@
 -- Animation.lua: Animated sprite display for DjLust
--- MEMORY LEAK FIXED VERSION - Aggressive cleanup
 
 local addonName, addon = ...
 
--- Theme configurations
+-- Animation sprite configs (keyed by animationStyle value)
 local THEMES = {
     chipi = {
         texture    = "Interface\\AddOns\\DjLust\\chipi.tga",
@@ -17,19 +16,13 @@ local THEMES = {
         columns    = 4,
         rows       = 8,
     },
-    custom = {
-        texture    = "Interface\\AddOns\\DjLust\\pedrolust.tga",
-        frameCount = 32,
-        columns    = 4,
-        rows       = 8,
-    },
     text = {
-        -- No texture or ticker needed; renders DjLustDB.partyText as a FontString
         isText     = true,
         frameCount = 1,
         columns    = 1,
         rows       = 1,
     },
+    -- "none" is handled by early-exit in StartAnimation; no entry needed
 }
 
 -- Animation state
@@ -70,12 +63,12 @@ animText:SetTextColor(1, 1, 0)   -- bright yellow, easy to see
 animText:SetFont("Fonts\\FRIZQT__.TTF", 32, "OUTLINE")
 animText:Hide()
 
--- Helper to get current theme safely
+-- Get current animation style safely
 local function GetCurrentTheme()
     if not DjLustDB then return "chipi" end
-    local theme = DjLustDB.theme or "chipi"
-    if not THEMES[theme] then return "chipi" end
-    return theme
+    local style = DjLustDB.animationStyle or "chipi"
+    if not THEMES[style] then return "chipi" end
+    return style
 end
 
 -- Update texture/text based on theme
@@ -187,10 +180,8 @@ end
 -- Start animation (WITH MEMORY LEAK FIXES)
 function addon:StartAnimation()
     -- Respect the enable flag set in settings
-    if DjLustDB and DjLustDB.animationEnabled == false then
-        if printDebug then
-            printDebug("|cff00bfff[DjLust]|r Animation disabled in settings, skipping.")
-        end
+    if DjLustDB and DjLustDB.animationStyle == "none" then
+        if printDebug then printDebug("|cff00bfff[DjLust]|r Animation set to None, skipping.") end
         return
     end
 
