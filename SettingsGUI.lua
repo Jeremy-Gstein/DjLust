@@ -67,6 +67,7 @@ local function EnsureDBDefaults()
     DjLustDB.volume         = DjLustDB.volume         or 1.0
     DjLustDB.theme          = DjLustDB.theme          or "chipi"
     DjLustDB.customSong     = DjLustDB.customSong     or ""
+    DjLustDB.partyText      = DjLustDB.partyText      or "PARTY TIME!"
     DjLustDB.animationX     = DjLustDB.animationX     or 0
     DjLustDB.animationY     = DjLustDB.animationY     or 0
     DjLustDB.hasteThreshold = DjLustDB.hasteThreshold or 25
@@ -93,6 +94,8 @@ local function UpdateUIValues(f)
     if ui.chipiRadio   then ui.chipiRadio:SetChecked(DjLustDB.theme == "chipi")    end
     if ui.pedroRadio   then ui.pedroRadio:SetChecked(DjLustDB.theme == "pedro")    end
     if ui.customRadio  then ui.customRadio:SetChecked(DjLustDB.theme == "custom")  end
+    if ui.textRadio    then ui.textRadio:SetChecked(DjLustDB.theme == "text")      end
+    if ui.partyTextBox then ui.partyTextBox:SetText(DjLustDB.partyText or "PARTY TIME!") end
 
     if ui.sizeSlider and ui.sizeLabel then
         ui.sizeSlider:SetValue(DjLustDB.animationSize)
@@ -381,12 +384,19 @@ local function CreateSettingsWindow()
     customRadio.text:SetText("Custom Song")
     customRadio:SetChecked(DjLustDB.theme == "custom")
 
+    -- Text Display radio on the right of the same row as Custom Song
+    local textRadio = CreateFrame("CheckButton", nil, content, "UIRadioButtonTemplate")
+    textRadio:SetPoint("TOPLEFT", 225, yOffset)
+    textRadio.text:SetText("Text Display")
+    textRadio:SetChecked(DjLustDB.theme == "text")
+
     f.uiElements.chipiRadio  = chipiRadio
     f.uiElements.pedroRadio  = pedroRadio
     f.uiElements.customRadio = customRadio
+    f.uiElements.textRadio   = textRadio
     yOffset = yOffset - 30
 
-    -- Custom Song Dropdown
+    -- Custom Song Dropdown (shown for both Custom Song and Text Display themes)
     local dropdownLabel = content:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
     dropdownLabel:SetPoint("TOPLEFT", 55, yOffset)
     dropdownLabel:SetText("Select song from Interface\\AddOns\\Songs folder:")
@@ -396,24 +406,45 @@ local function CreateSettingsWindow()
     dropdown:SetPoint("TOPLEFT", 45, yOffset)
 
     local function GetAvailableSongs()
-        local songs = {"(None)"}
-        if not CUSTOM_SONGS or type(CUSTOM_SONGS) ~= "table" then return songs end
-        for _, songFile in ipairs(CUSTOM_SONGS) do
-            songFile = songFile:match("^%s*(.-)%s*$")
-            if songFile ~= "" then
-                local path = "Interface\\AddOns\\Songs\\" .. songFile
-                local willPlay, handle = PlaySoundFile(path, "Master")
-                if willPlay and handle then
-                    table.insert(songs, songFile)
-                    StopSound(handle)
+        -- Built-in songs are always available directly from the addon folder
+        local BUILTIN = {
+            { label = "chipilust.mp3 (built-in)", path = "Interface\\AddOns\\DjLust\\chipilust.mp3" },
+            { label = "pedrolust.mp3 (built-in)", path = "Interface\\AddOns\\DjLust\\pedrolust.mp3" },
+        }
+
+        local songs = { { label = "(None)", path = "" } }
+
+        -- Verify each built-in file is actually playable before listing it
+        for _, entry in ipairs(BUILTIN) do
+            local willPlay, handle = PlaySoundFile(entry.path, "Master")
+            if willPlay and handle then
+                table.insert(songs, entry)
+                StopSound(handle)
+            end
+        end
+
+        -- User-supplied songs from the Songs folder
+        if CUSTOM_SONGS and type(CUSTOM_SONGS) == "table" then
+            for _, songFile in ipairs(CUSTOM_SONGS) do
+                songFile = songFile:match("^%s*(.-)%s*$")
+                if songFile ~= "" then
+                    local path = "Interface\\AddOns\\Songs\\" .. songFile
+                    local willPlay, handle = PlaySoundFile(path, "Master")
+                    if willPlay and handle then
+                        table.insert(songs, { label = songFile, path = path })
+                        StopSound(handle)
+                    end
                 end
             end
         end
+
         return songs
     end
 
     local function UpdateDropdownState()
-        if DjLustDB.theme == "custom" then
+        -- Dropdown is active for both custom song and text display themes
+        local active = DjLustDB.theme == "custom" or DjLustDB.theme == "text"
+        if active then
             UIDropDownMenu_EnableDropDown(dropdown)
             dropdownLabel:SetTextColor(1, 1, 1)
         else
@@ -425,18 +456,19 @@ local function CreateSettingsWindow()
     local function InitDropdown(self, level)
         local info  = UIDropDownMenu_CreateInfo()
         local songs = GetAvailableSongs()
-        for _, song in ipairs(songs) do
-            info.text    = song
-            info.value   = song
-            info.checked = (DjLustDB.customSong == song) or
-                           (song == "(None)" and DjLustDB.customSong == "")
+        for _, entry in ipairs(songs) do
+            info.text    = entry.label
+            info.value   = entry.path
+            info.checked = (DjLustDB.customSong == entry.path) or
+                           (entry.path == "" and DjLustDB.customSong == "")
             info.func = function()
-                DjLustDB.customSong = (song == "(None)") and "" or song
-                UIDropDownMenu_SetText(dropdown, song)
-                if DjLustDB.theme == "custom" and addon.UpdateTheme then
-                    addon:UpdateTheme("custom")
-                    print("|cff00bfff[DjLust]|r Custom song changed to: " ..
-                          (song == "(None)" and "None" or song))
+                DjLustDB.customSong = entry.path
+                UIDropDownMenu_SetText(dropdown, entry.label)
+                local theme = DjLustDB.theme
+                if (theme == "custom" or theme == "text") and addon.UpdateTheme then
+                    addon:UpdateTheme(theme)
+                    print("|cff00bfff[DjLust]|r Song changed to: " ..
+                          (entry.path == "" and "None" or entry.label))
                 end
             end
             UIDropDownMenu_AddButton(info, level)
@@ -445,32 +477,98 @@ local function CreateSettingsWindow()
 
     UIDropDownMenu_Initialize(dropdown, InitDropdown)
     UIDropDownMenu_SetWidth(dropdown, 250)
-    UIDropDownMenu_SetText(dropdown,
-        (DjLustDB.customSong and DjLustDB.customSong ~= "") and DjLustDB.customSong or "(None)")
+
+    -- Set initial dropdown label: find the matching entry by path
+    do
+        local songs       = GetAvailableSongs()
+        local displayText = "(None)"
+        for _, entry in ipairs(songs) do
+            if entry.path == DjLustDB.customSong then
+                displayText = entry.label
+                break
+            end
+        end
+        UIDropDownMenu_SetText(dropdown, displayText)
+    end
     UpdateDropdownState()
     yOffset = yOffset - 35
 
+    -- Party Text EditBox (visible only when text theme is active)
+    local partyTextLabel = content:CreateFontString(nil, "OVERLAY", "GameFontNormal")
+    partyTextLabel:SetPoint("TOPLEFT", 25, yOffset)
+    partyTextLabel:SetText("Display Text:")
+    yOffset = yOffset - 22
+
+    local partyTextBox = CreateFrame("EditBox", "DjLustPartyTextBox", content, "InputBoxTemplate")
+    partyTextBox:SetPoint("TOPLEFT", 35, yOffset)
+    partyTextBox:SetWidth(340)
+    partyTextBox:SetHeight(24)
+    partyTextBox:SetAutoFocus(false)
+    partyTextBox:SetMaxLetters(64)
+    partyTextBox:SetText(DjLustDB.partyText or "PARTY TIME!")
+    partyTextBox:SetScript("OnEnterPressed", function(self)
+        self:ClearFocus()
+        local txt = self:GetText()
+        if txt == "" then txt = "PARTY TIME!" end
+        DjLustDB.partyText = txt
+        self:SetText(txt)
+        if addon.UpdatePartyText then addon:UpdatePartyText(txt) end
+    end)
+    partyTextBox:SetScript("OnEscapePressed", function(self)
+        self:SetText(DjLustDB.partyText or "PARTY TIME!")
+        self:ClearFocus()
+    end)
+    f.uiElements.partyTextBox = partyTextBox
+
+    local partyTextHint = content:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
+    partyTextHint:SetPoint("TOPLEFT", 35, yOffset - 26)
+    partyTextHint:SetText("|cff808080Press Enter to apply|r")
+
+    -- Helper to show/hide the party text controls
+    local function UpdatePartyTextVisibility()
+        local show = DjLustDB.theme == "text"
+        if show then
+            partyTextLabel:Show() ; partyTextBox:Show() ; partyTextHint:Show()
+        else
+            partyTextLabel:Hide() ; partyTextBox:Hide() ; partyTextHint:Hide()
+        end
+    end
+    UpdatePartyTextVisibility()
+
+    yOffset = yOffset - 45   -- space for EditBox + hint (always reserved to avoid layout jumps)
+
     chipiRadio:SetScript("OnClick", function()
         DjLustDB.theme = "chipi"
-        chipiRadio:SetChecked(true) ; pedroRadio:SetChecked(false) ; customRadio:SetChecked(false)
-        UpdateDropdownState()
+        chipiRadio:SetChecked(true) ; pedroRadio:SetChecked(false)
+        customRadio:SetChecked(false) ; textRadio:SetChecked(false)
+        UpdateDropdownState() ; UpdatePartyTextVisibility()
         if addon.UpdateTheme then addon:UpdateTheme("chipi") end
         print("|cff00bfff[DjLust]|r Theme changed to: |cffff1493Chipi Chipi|r")
     end)
     pedroRadio:SetScript("OnClick", function()
         DjLustDB.theme = "pedro"
-        chipiRadio:SetChecked(false) ; pedroRadio:SetChecked(true) ; customRadio:SetChecked(false)
-        UpdateDropdownState()
+        chipiRadio:SetChecked(false) ; pedroRadio:SetChecked(true)
+        customRadio:SetChecked(false) ; textRadio:SetChecked(false)
+        UpdateDropdownState() ; UpdatePartyTextVisibility()
         if addon.UpdateTheme then addon:UpdateTheme("pedro") end
         print("|cff00bfff[DjLust]|r Theme changed to: |cff00ff00Pedro|r")
     end)
     customRadio:SetScript("OnClick", function()
         DjLustDB.theme = "custom"
-        chipiRadio:SetChecked(false) ; pedroRadio:SetChecked(false) ; customRadio:SetChecked(true)
-        UpdateDropdownState()
+        chipiRadio:SetChecked(false) ; pedroRadio:SetChecked(false)
+        customRadio:SetChecked(true) ; textRadio:SetChecked(false)
+        UpdateDropdownState() ; UpdatePartyTextVisibility()
         if addon.UpdateTheme then addon:UpdateTheme("custom") end
         local songName = (DjLustDB.customSong ~= "") and DjLustDB.customSong or "No song selected"
         print("|cff00bfff[DjLust]|r Theme changed to: |cff9370dbCustom|r (" .. songName .. ")")
+    end)
+    textRadio:SetScript("OnClick", function()
+        DjLustDB.theme = "text"
+        chipiRadio:SetChecked(false) ; pedroRadio:SetChecked(false)
+        customRadio:SetChecked(false) ; textRadio:SetChecked(true)
+        UpdateDropdownState() ; UpdatePartyTextVisibility()
+        if addon.UpdateTheme then addon:UpdateTheme("text") end
+        print("|cff00bfff[DjLust]|r Theme changed to: |cffffff00Text Display|r")
     end)
 
     -- Volume Slider
@@ -814,7 +912,7 @@ local function RegisterOptionsPanel()
         end
     end
 
-    Div() ; Skip(4) ; Skip(60)
+    Div() ; Skip(4) ; Skip(90)
     Fs("GameFontHighlightSmall", "|cffff8800 GitHub  (issues, bugs, and feature requests):|r", LX)
     Fs("GameFontHighlightSmall", "|cffff8800 Seems Good Community:|r", RX)
     Skip(16)

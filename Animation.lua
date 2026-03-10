@@ -6,22 +6,29 @@ local addonName, addon = ...
 -- Theme configurations
 local THEMES = {
     chipi = {
-        texture = "Interface\\AddOns\\DjLust\\chipi.tga",
+        texture    = "Interface\\AddOns\\DjLust\\chipi.tga",
         frameCount = 4,
-        columns = 2,
-        rows = 2,
+        columns    = 2,
+        rows       = 2,
     },
     pedro = {
-        texture = "Interface\\AddOns\\DjLust\\pedrolust.tga",
+        texture    = "Interface\\AddOns\\DjLust\\pedrolust.tga",
         frameCount = 32,
-        columns = 4,
-        rows = 8,
+        columns    = 4,
+        rows       = 8,
     },
     custom = {
-        texture = "Interface\\AddOns\\DjLust\\pedrolust.tga",
+        texture    = "Interface\\AddOns\\DjLust\\pedrolust.tga",
         frameCount = 32,
-        columns = 4,
-        rows = 8,
+        columns    = 4,
+        rows       = 8,
+    },
+    text = {
+        -- No texture or ticker needed; renders DjLustDB.partyText as a FontString
+        isText     = true,
+        frameCount = 1,
+        columns    = 1,
+        rows       = 1,
     },
 }
 
@@ -50,39 +57,52 @@ animFrame:SetSize(128, 128)
 animFrame:SetPoint("CENTER", UIParent, "CENTER", 0, 0)
 animFrame:Hide()
 
--- Create texture
+-- Create texture (hidden for text theme)
 local animTexture = animFrame:CreateTexture(nil, "ARTWORK")
 animTexture:SetAllPoints(animFrame)
 
-
+-- Create text display (shown only for text theme)
+local animText = animFrame:CreateFontString(nil, "OVERLAY", "GameFontNormal")
+animText:SetAllPoints(animFrame)
+animText:SetJustifyH("CENTER")
+animText:SetJustifyV("MIDDLE")
+animText:SetTextColor(1, 1, 0)   -- bright yellow, easy to see
+animText:SetFont("Fonts\\FRIZQT__.TTF", 32, "OUTLINE")
+animText:Hide()
 
 -- Helper to get current theme safely
 local function GetCurrentTheme()
-    if not DjLustDB then
-        return "chipi"
-    end
+    if not DjLustDB then return "chipi" end
     local theme = DjLustDB.theme or "chipi"
-    if not THEMES[theme] then
-        return "chipi"
-    end
+    if not THEMES[theme] then return "chipi" end
     return theme
 end
 
--- Update texture based on theme
+-- Update texture/text based on theme
 local function UpdateTexture()
-    local theme = GetCurrentTheme()
+    local theme       = GetCurrentTheme()
     local themeConfig = THEMES[theme]
-    
+
     if not themeConfig then
         print("|cff00bfff[DjLust]|r |cffff0000ERROR:|r Invalid theme configuration")
         return false
     end
-    
-    animTexture:SetTexture(themeConfig.texture)
-    animState.frameCount = themeConfig.frameCount or 4
-    animState.columns = themeConfig.columns or 2
-    animState.rows = themeConfig.rows or 2
-    
+
+    if themeConfig.isText then
+        -- Text theme: hide sprite texture, show FontString
+        animTexture:SetTexture(nil)
+        animText:SetText(DjLustDB and DjLustDB.partyText or "PARTY TIME!")
+        animState.frameCount = 1
+        animState.columns    = 1
+        animState.rows       = 1
+    else
+        -- Sprite theme: hide text, set texture
+        animTexture:SetTexture(themeConfig.texture)
+        animState.frameCount = themeConfig.frameCount or 4
+        animState.columns    = themeConfig.columns    or 2
+        animState.rows       = themeConfig.rows       or 2
+    end
+
     return true
 end
 
@@ -218,15 +238,27 @@ function addon:StartAnimation()
 
     animState.isPlaying = true
     animState.currentFrame = 0
+
+    local isTextTheme = THEMES[GetCurrentTheme()] and THEMES[GetCurrentTheme()].isText
+    if isTextTheme then
+        -- Text theme: show FontString, hide sprite texture, skip ticker
+        animTexture:Hide()
+        animText:SetText(DjLustDB and DjLustDB.partyText or "PARTY TIME!")
+        animText:Show()
+    else
+        -- Sprite theme: hide text, show texture, start ticker
+        animText:Hide()
+        animTexture:Show()
+        UpdateAnimationFrame()
+        StartTicker()
+    end
+
     animFrame:Show()
-    
-    UpdateAnimationFrame()
-    StartTicker()
-    
+
     -- Fade in
     animFrame:SetAlpha(0)
     UIFrameFadeIn(animFrame, 0.3, 0, 1)
-    
+
     if DjLustDB and DjLustDB.debugMode then
         local theme = GetCurrentTheme()
         print("|cff00bfff[DjLust]|r |cffff1493Animation started!|r (Theme: " .. theme .. ")")
@@ -248,7 +280,8 @@ function addon:StopAnimation()
     
     animState.isPlaying = false
     StopTicker()
-    
+    animText:Hide()   -- ensure text is cleared regardless of theme
+
     -- Cleanup animation groups before creating new one
     CleanupAnimationGroups()
     
@@ -303,6 +336,14 @@ function addon:UpdateAnimationFPS(fps)
     animState.fps = fps
     if animState.isPlaying then
         StartTicker()
+    end
+end
+
+-- Live-update the party text while the animation is running
+function addon:UpdatePartyText(text)
+    DjLustDB.partyText = text
+    if animState.isPlaying and THEMES[GetCurrentTheme()].isText then
+        animText:SetText(text)
     end
 end
 

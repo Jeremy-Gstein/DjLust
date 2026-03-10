@@ -12,23 +12,29 @@ DjLustDB.hasteThreshold = DjLustDB.hasteThreshold or 25  -- Default 25%
 DjLustDB.soundChannel = DjLustDB.soundChannel or "Dialog"
 DjLustDB.muteSound = DjLustDB.muteSound or false
 if DjLustDB.animationLocked == nil then DjLustDB.animationLocked = false end
+DjLustDB.partyText = DjLustDB.partyText or "PARTY TIME!"
 
 -- Theme configurations
 local THEMES = {
     chipi = {
-        name = "Chipi Chipi",
-        music = "Interface\\AddOns\\DjLust\\Music.mp3",
+        name      = "Chipi Chipi",
+        music     = "Interface\\AddOns\\DjLust\\chipilust.mp3",
         animation = "Interface\\AddOns\\DjLust\\chipi.tga",
     },
     pedro = {
-        name = "Pedro",
-        music = "Interface\\AddOns\\DjLust\\pedrolust.mp3",
+        name      = "Pedro",
+        music     = "Interface\\AddOns\\DjLust\\pedrolust.mp3",
         animation = "Interface\\AddOns\\DjLust\\pedrolust.tga",
     },
     custom = {
-        name = "Custom Song",
-        music = nil,  -- Set dynamically from DjLustDB.customSong
-        animation = "Interface\\AddOns\\DjLust\\pedrolust.tga", 
+        name      = "Custom Song",
+        music     = nil,  -- Set dynamically from DjLustDB.customSong
+        animation = "Interface\\AddOns\\DjLust\\pedrolust.tga",
+    },
+    text = {
+        name      = "Text Display",
+        music     = nil,  -- Set dynamically from DjLustDB.customSong; falls back to chipilust.mp3
+        animation = nil,  -- No sprite; Animation.lua renders partyText instead
     },
 }
 
@@ -83,17 +89,21 @@ local BLOODLUST_COOLDOWN = 30
 -- Get current theme's music file
 local function GetMusicFile()
     local theme = THEMES[DjLustDB.theme] or THEMES.chipi
-    
-    -- For custom theme, use the selected custom song
-    if DjLustDB.theme == "custom" then
+
+    -- custom and text themes both use the full path stored in DjLustDB.customSong
+    if DjLustDB.theme == "custom" or DjLustDB.theme == "text" then
         if DjLustDB.customSong and DjLustDB.customSong ~= "" then
-            return "Interface\\AddOns\\Songs\\" .. DjLustDB.customSong
-        else
-            printDebug("Custom theme selected but no song chosen, using default")
-            return THEMES.chipi.music
+            return DjLustDB.customSong  -- already a full path
         end
+        if DjLustDB.theme == "text" then
+            -- Default music for text display: chipilust from the addon folder
+            printDebug("Text theme: no song selected, falling back to chipilust.mp3")
+            return "Interface\\AddOns\\DjLust\\chipilust.mp3"
+        end
+        printDebug("Custom theme selected but no song chosen, using default")
+        return THEMES.chipi.music
     end
-    
+
     return theme.music
 end
 
