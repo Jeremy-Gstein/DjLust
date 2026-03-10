@@ -814,7 +814,7 @@ local function RegisterOptionsPanel()
         end
     end
 
-    Div() ; Skip(4) ; Skip(90)
+    Div() ; Skip(4) ; Skip(60)
     Fs("GameFontHighlightSmall", "|cffff8800 GitHub  (issues, bugs, and feature requests):|r", LX)
     Fs("GameFontHighlightSmall", "|cffff8800 Seems Good Community:|r", RX)
     Skip(16)
