@@ -763,7 +763,7 @@ local function RegisterOptionsPanel()
     end
 
     Div() ; Skip(4) ; Skip(60)
-    Fs("GameFontHighlightSmall", "|cffff8800 GitHub:|r", LX)
+    Fs("GameFontHighlightSmall", "|cffff8800 Issues | Bugs | Feedback -> Use GitHub:|r", LX)
     Fs("GameFontHighlightSmall", "|cffff8800 Seems Good Community:|r", RX)
     Skip(16)
     Fs("GameFontHighlightSmall", "|cff00bfffhttps://github.com/Jeremy-Gstein/DjLust|r", LX + 4)
