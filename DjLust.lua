@@ -24,6 +24,7 @@ DjLustDB.partyText      = DjLustDB.partyText      or "PARTY TIME!"
 DjLustDB.volume         = DjLustDB.volume         or 1.0
 DjLustDB.soundChannel   = DjLustDB.soundChannel   or "Dialog"
 DjLustDB.muteSound      = DjLustDB.muteSound      or false
+DjLustDB.savedSongs     = DjLustDB.savedSongs     or {}
 DjLustDB.hasteThreshold = DjLustDB.hasteThreshold or 25
 if DjLustDB.animationLocked == nil then DjLustDB.animationLocked = false end
 

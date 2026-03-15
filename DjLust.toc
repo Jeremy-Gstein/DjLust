@@ -1,5 +1,5 @@
 ## Interface: 120000, 120001
-## Version: 1.0.0
+## Version: 1.1.0-beta
 ## Title: DjLust
 ## Notes: Play music and display animations when Bloodlust and other similar spells are detected!
 ## Author: Jeremy-Gstein
@@ -15,4 +15,3 @@ DjLust.lua
 Animation.lua
 SettingsGUI.lua
 MinimapButton.lua
-CustomSongs.lua

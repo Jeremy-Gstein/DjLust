@@ -39,6 +39,7 @@ local function EnsureDBDefaults()
     DjLustDB.volume         = DjLustDB.volume         or 1.0
     DjLustDB.soundChannel   = DjLustDB.soundChannel   or "Dialog"
     DjLustDB.muteSound      = DjLustDB.muteSound      or false
+    DjLustDB.savedSongs     = DjLustDB.savedSongs     or {}
     DjLustDB.hasteThreshold = DjLustDB.hasteThreshold or 25
     DjLustDB.debugMode      = DjLustDB.debugMode      or false
     if DjLustDB.animationLocked == nil then DjLustDB.animationLocked = false end
@@ -86,6 +87,36 @@ local function UpdateUIValues(f)
     if ui.minimapCheck then ui.minimapCheck:SetChecked(not DjLustDB.minimap.hide) end
     if ui.debugCheck   then ui.debugCheck:SetChecked(DjLustDB.debugMode)          end
 end
+
+--------------------------------------------------
+-- Confirm-remove popup
+--------------------------------------------------
+StaticPopupDialogs["DJLUST_CONFIRM_REMOVE"] = {
+    text          = "Remove \"%s\" from your song library?",
+    button1       = "Yes, Remove",
+    button2       = "Cancel",
+    timeout       = 0,
+    whileDead     = true,
+    hideOnEscape  = true,
+    preferredIndex = 3,
+    OnAccept = function(self, data)
+        if not data then return end
+        DjLustDB.savedSongs = DjLustDB.savedSongs or {}
+        for j = #DjLustDB.savedSongs, 1, -1 do
+            if DjLustDB.savedSongs[j].path == data.path then
+                table.remove(DjLustDB.savedSongs, j)
+                break
+            end
+        end
+        if DjLustDB.music == data.path then
+            DjLustDB.music = ""
+            if addon.UpdateMusic then addon:UpdateMusic("") end
+            local dd = _G["DjLustSongDropdown"]
+            if dd then UIDropDownMenu_SetText(dd, "(None / Default)") end
+        end
+        if data.onDone then data.onDone() end
+    end,
+}
 
 --------------------------------------------------
 -- Create Settings Window
@@ -365,17 +396,9 @@ local function CreateSettingsWindow()
             local ok, h = PlaySoundFile(e.path, "Master")
             if ok and h then table.insert(songs, e) ; StopSound(h) end
         end
-        if CUSTOM_SONGS and type(CUSTOM_SONGS) == "table" then
-            for _, file in ipairs(CUSTOM_SONGS) do
-                file = file:match("^%s*(.-)%s*$")
-                if file ~= "" then
-                    local path = "Interface\\AddOns\\Songs\\" .. file
-                    local ok, h = PlaySoundFile(path, "Master")
-                    if ok and h then
-                        table.insert(songs, { label = file, path = path })
-                        StopSound(h)
-                    end
-                end
+        if DjLustDB.savedSongs then
+            for _, entry in ipairs(DjLustDB.savedSongs) do
+                table.insert(songs, { label = entry.name, path = entry.path })
             end
         end
         return songs
@@ -412,7 +435,116 @@ local function CreateSettingsWindow()
     end
     y = y - 35
 
-    -- Volume slider
+    -- ── Add / Remove Custom Song ───────────────────────────────────────────
+    local addSongLabel = content:CreateFontString(nil, "OVERLAY", "GameFontNormal")
+    addSongLabel:SetPoint("TOPLEFT", 25, y)
+    addSongLabel:SetText("Add Song:")
+
+    local songSearchBox = CreateFrame("EditBox", "DjLustSongSearchBox", content, "InputBoxTemplate")
+    songSearchBox:SetPoint("TOPLEFT", 100, y + 2)
+    songSearchBox:SetWidth(150)
+    songSearchBox:SetHeight(22)
+    songSearchBox:SetAutoFocus(false)
+    songSearchBox:SetMaxLetters(128)
+
+    local songAddBtn = CreateFrame("Button", nil, content, "UIPanelButtonTemplate")
+    songAddBtn:SetPoint("TOPLEFT", 255, y)
+    songAddBtn:SetSize(48, 24)
+    songAddBtn:SetText("Add")
+
+    local songRemoveSelBtn = CreateFrame("Button", nil, content, "UIPanelButtonTemplate")
+    songRemoveSelBtn:SetPoint("TOPLEFT", 307, y)
+    songRemoveSelBtn:SetSize(72, 24)
+    songRemoveSelBtn:SetText("|cffff7777Remove|r")
+    y = y - 22
+
+    local addHint = content:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
+    addHint:SetPoint("TOPLEFT", 100, y)
+    addHint:SetText("|cff606060e.g. mysong or mysong.mp3  (files live in AddOns\\Songs\\)|r")
+    y = y - 18
+
+    local addStatus = content:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
+    addStatus:SetPoint("TOPLEFT", 25, y)
+    addStatus:SetText("")
+    y = y - 20
+
+    -- ── ConfirmRemove popup helper ─────────────────────────────────────────
+    local function ConfirmRemove(capPath, capName)
+        StaticPopup_Show("DJLUST_CONFIRM_REMOVE", capName, nil, {
+            path   = capPath,
+            name   = capName,
+            onDone = function()
+                addStatus:SetText("|cffff8800Removed: " .. capName .. "|r")
+                UIDropDownMenu_Initialize(dropdown, InitDropdown)
+                if DjLustDB.music == capPath then
+                    DjLustDB.music = ""
+                    UIDropDownMenu_SetText(dropdown, "(None / Default)")
+                    if addon.UpdateMusic then addon:UpdateMusic("") end
+                end
+            end,
+        })
+    end
+
+    -- ── Remove button — acts on current dropdown selection ─────────────────
+    songRemoveSelBtn:SetScript("OnClick", function()
+        local selPath = DjLustDB.music
+        if not selPath or selPath == "" then
+            addStatus:SetText("|cffff6600Select a custom song in the dropdown first.|r")
+            return
+        end
+        if selPath:find("Interface\\AddOns\\DjLust\\", 1, true) then
+            addStatus:SetText("|cffff6600Built-in songs cannot be removed.|r")
+            return
+        end
+        local found
+        for _, e in ipairs(DjLustDB.savedSongs or {}) do
+            if e.path == selPath then found = e ; break end
+        end
+        if not found then
+            addStatus:SetText("|cffff6600Song not found in saved library.|r")
+            return
+        end
+        ConfirmRemove(found.path, found.name)
+    end)
+
+    -- ── TryAddSong ─────────────────────────────────────────────────────────
+    local function TryAddSong()
+        local raw = songSearchBox:GetText():match("^%s*(.-)%s*$")
+        if raw == "" then
+            addStatus:SetText("|cffff6600Enter a filename first.|r")
+            return
+        end
+        local filename = raw:lower():match("%.mp3$") and raw or (raw .. ".mp3")
+        local path = "Interface\\AddOns\\Songs\\" .. filename
+        local ok, h = PlaySoundFile(path, "Master")
+        if ok then
+            if h then StopSound(h) end
+            DjLustDB.savedSongs = DjLustDB.savedSongs or {}
+            for _, e in ipairs(DjLustDB.savedSongs) do
+                if e.path == path then
+                    addStatus:SetText("|cffff6600Already in library: " .. filename .. "|r")
+                    return
+                end
+            end
+            table.insert(DjLustDB.savedSongs, { name = filename, path = path })
+            songSearchBox:SetText("")
+            addStatus:SetText("|cff00ff00Added: " .. filename .. "|r")
+            UIDropDownMenu_Initialize(dropdown, InitDropdown)
+        else
+            addStatus:SetText("|cffff0000Not found: " .. filename ..
+                "  — is it in AddOns\\Songs\\ ?|r")
+        end
+    end
+
+    songAddBtn:SetScript("OnClick", TryAddSong)
+    songSearchBox:SetScript("OnEnterPressed", function(self)
+        TryAddSong() ; self:ClearFocus()
+    end)
+    songSearchBox:SetScript("OnEscapePressed", function(self)
+        self:SetText("") ; self:ClearFocus()
+    end)
+
+    -- ── Volume slider
     local volumeLabel = Label("Volume: " .. math.floor(DjLustDB.volume * 100) .. "%")
     y = y - 22
     local volumeSlider = CreateFrame("Slider", nil, content, "OptionsSliderTemplate")
@@ -738,10 +870,8 @@ local function RegisterOptionsPanel()
         { "|cffffe0663.|r  Create folder  |cff00ff00Songs|r",
           "|cffaaaaaa Interface\\AddOns\\Songs\\|r" },
         { "|cffffe0664.|r  Copy  |cffffffff .mp3|r  files into  |cff00ff00Songs|r", "" },
-        { "|cffffe0665.|r  Edit  |cffffffff DjLust\\CustomSongs.lua|r",
-          "Add filename to  |cff00ff00CUSTOM_SONGS|r" },
-        { "|cffffe0666.|r  Type  |cffffffff /reload|r  in-game.", "" },
-        { "|cffffe0667.|r  Settings -> Music -> dropdown", "Select song. Done!" },
+        { "|cffffe0665.|r  Type  |cffffffff /reload|r  in-game.", "" },
+        { "|cffffe0666.|r  Settings -> Music -> Search Box", "Search for Existing Music Files." },
     }
     for i, row in ipairs(STEPS) do
         local left = panel:CreateFontString(nil, "ARTWORK", "GameFontHighlightSmall")
