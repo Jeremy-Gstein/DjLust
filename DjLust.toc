@@ -10,7 +10,6 @@
 ## X-Website: https://github.com/Jeremy-Gstein/DjLust
 ## X-Curse-Project-ID: 1049985
 
-
 DjLust.lua
 Animation.lua
 SettingsGUI.lua
