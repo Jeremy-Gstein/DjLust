@@ -1,54 +1,38 @@
 -- DjLust: Production version with music!
--- Detects Bloodlust (and similar spells) via haste changes and plays music
+-- Detects Bloodlust (and similar spells) via aura detection and plays music
+-- v1.2.0: Detection via issecretvalue() guard on UNIT_AURA addedAuras (ported from BudgetPedro)
 
 local addonName, addon = ...
 
--- Initialize saved variables with defaults
-DjLustDB = DjLustDB or {}
-
--- Schema migration from v1 (theme/customSong) to v2 (animationStyle/music)
-if DjLustDB.theme and not DjLustDB.animationStyle then
-    local styleMap = { chipi = "chipi", pedro = "pedro", text = "text", custom = "chipi" }
-    DjLustDB.animationStyle = styleMap[DjLustDB.theme] or "chipi"
-    if DjLustDB.customSong and DjLustDB.customSong ~= "" then
-        DjLustDB.music = DjLustDB.customSong
-    end
-    DjLustDB.theme      = nil
-    DjLustDB.customSong = nil
-end
-if DjLustDB.animationEnabled ~= nil then DjLustDB.animationEnabled = nil end
-
-DjLustDB.animationStyle = DjLustDB.animationStyle or "chipi"
-DjLustDB.music          = DjLustDB.music          or ""
-DjLustDB.partyText      = DjLustDB.partyText      or "PARTY TIME!"
-DjLustDB.volume         = DjLustDB.volume         or 1.0
-DjLustDB.soundChannel   = DjLustDB.soundChannel   or "Dialog"
-DjLustDB.muteSound      = DjLustDB.muteSound      or false
-DjLustDB.savedSongs     = DjLustDB.savedSongs     or {}
-DjLustDB.hasteThreshold = DjLustDB.hasteThreshold or 25
-if DjLustDB.animationLocked == nil then DjLustDB.animationLocked = false end
-
--- Built-in music file paths
-local BUILTIN_MUSIC = {
-    chipi = "Interface\\AddOns\\DjLust\\chipilust.mp3",
-    pedro = "Interface\\AddOns\\DjLust\\pedrolust.mp3",
+-- Sated-type debuff IDs. In 12.0.5 aura spellIds may be secret values that
+-- cannot be used as table keys. BudgetPedro's solution: read aura.spellId
+-- normally but skip it with issecretvalue() if it is protected. Non-secret
+-- Sated debuff IDs are still readable and fire at the exact same instant as
+-- the lust buff itself.
+local SATED_DEBUFF_IDS = {
+    [57723]  = true, -- Exhaustion           (Heroism / Fury of the Aspects / Primal Rage)
+    [57724]  = true, -- Sated                (Bloodlust)
+    [80354]  = true, -- Temporal Displacement (Time Warp)
+    [95809]  = true, -- Insanity             (Ancient Hysteria - Core Hound pet)
+    [160455] = true, -- Fatigued             (Drums of the Maelstrom)
+    [264689] = true, -- Fatigued             (Hunter pet variant)
+    [390435] = true, -- Exhaustion           (additional variant)
 }
 
 -- Track state
-local isLusted = false
-local baselineHaste = nil
-local hasteCheckTimer = nil
-local debugAddon = false
-local bloodlustCooldown = 0
+local isLusted      = false
+local activeDebufID = nil  -- Sated-type debuff ID that triggered detection
+local lustEndTimer  = nil  -- C_Timer handle; stops music after lust duration
+local debugAddon    = false
 
--- Sound handle management 
+-- Sound handle management
 local soundHandlePool = {}
-local lastPlayTime = 0
-local PLAY_COOLDOWN = 0.5  -- Prevent rapid-fire plays
+local lastPlayTime    = 0
+local PLAY_COOLDOWN   = 0.5
 
--- CVar caching 
+-- CVar caching
 local originalChannelVolume = nil
-local cvarDirty = false
+local cvarDirty             = false
 
 -- Sound channel -> CVar mapping
 local CHANNEL_CVARS = {
@@ -58,6 +42,50 @@ local CHANNEL_CVARS = {
     Music    = "Sound_MusicVolume",
     Ambience = "Sound_AmbienceVolume",
 }
+
+-- Built-in music file paths (defined early, no DB dependency)
+local BUILTIN_MUSIC = {
+    chipi = "Interface\\AddOns\\DjLust\\chipilust.mp3",
+    pedro = "Interface\\AddOns\\DjLust\\pedrolust.mp3",
+}
+
+-- Forward declarations so OnPlayerAuraUpdate (defined before the sound
+-- functions) can reference them without resolving to nil globals.
+local PlayDjLust, StopDjLust
+
+-- Event frame
+local frame = CreateFrame("Frame")
+
+-- ─── DB INIT (deferred until SavedVariables are loaded) ──────────────────────
+-- Mirrors BudgetPedro's EventUtil.ContinueOnAddOnLoaded pattern: all code that
+-- touches DjLustDB runs after ADDON_LOADED, when SavedVariables are guaranteed
+-- to be available. Without this, DjLustDB reads always return defaults.
+EventUtil.ContinueOnAddOnLoaded(addonName, function()
+    DjLustDB = DjLustDB or {}
+
+    -- Schema migration v1 (theme/customSong) → v2 (animationStyle/music)
+    if DjLustDB.theme and not DjLustDB.animationStyle then
+        local styleMap = { chipi = "chipi", pedro = "pedro", text = "text", custom = "chipi" }
+        DjLustDB.animationStyle = styleMap[DjLustDB.theme] or "chipi"
+        if DjLustDB.customSong and DjLustDB.customSong ~= "" then
+            DjLustDB.music = DjLustDB.customSong
+        end
+        DjLustDB.theme      = nil
+        DjLustDB.customSong = nil
+    end
+    if DjLustDB.animationEnabled ~= nil then DjLustDB.animationEnabled = nil end
+    -- Schema migration v2 (hasteThreshold) → v3 (aura-based, threshold unused)
+    if DjLustDB.hasteThreshold ~= nil then DjLustDB.hasteThreshold = nil end
+
+    DjLustDB.animationStyle = DjLustDB.animationStyle or "chipi"
+    DjLustDB.music          = DjLustDB.music          or ""
+    DjLustDB.partyText      = DjLustDB.partyText      or "PARTY TIME!"
+    DjLustDB.volume         = DjLustDB.volume         or 1.0
+    DjLustDB.soundChannel   = DjLustDB.soundChannel   or "Dialog"
+    DjLustDB.muteSound      = DjLustDB.muteSound      or false
+    DjLustDB.savedSongs     = DjLustDB.savedSongs     or {}
+    if DjLustDB.animationLocked == nil then DjLustDB.animationLocked = false end
+end)
 
 -- Returns true + reason string if the given channel (or master) is muted/zero
 local function IsChannelEffectivelyMuted(channel)
@@ -78,61 +106,84 @@ local function IsChannelEffectivelyMuted(channel)
     return false, nil
 end
 
--- Configuration
-local CHECK_INTERVAL = 0.5
-local BLOODLUST_COOLDOWN = 30
-
 -- Get current music file path
 local function GetMusicFile()
-    -- User-selected song takes priority (full path already stored)
-    if DjLustDB.music and DjLustDB.music ~= "" then
+    if DjLustDB and DjLustDB.music and DjLustDB.music ~= "" then
         return DjLustDB.music
     end
-    -- Default: chipi song
     return BUILTIN_MUSIC.chipi
 end
 
 -- Debug print helper
 function printDebug(...)
     if not debugAddon then return end
-    local prefix = "|cff00bfff[DjLust]|r |cffff8800[DEBUG]|r"
-    print(prefix, ...)
+    print("|cff00bfff[DjLust]|r |cffff8800[DEBUG]|r", ...)
 end
 
 local function SetDebug(enabled)
     debugAddon = enabled
-    print(string.format(
-        "|cff00bfff[DjLust]|r Debug mode %s",
-        enabled and "|cff00ff00ENABLED|r" or "|cffff0000DISABLED|r"
-    ))
+    print(string.format("|cff00bfff[DjLust]|r Debug mode %s",
+        enabled and "|cff00ff00ENABLED|r" or "|cffff0000DISABLED|r"))
 end
 
--- Event frame
-local frame = CreateFrame("Frame")
+-- ─── LUST DETECTION ──────────────────────────────────────────────────────────
+-- Ported from BudgetPedro (MIT). Key insight: aura.spellId may be a secret
+-- value in 12.0.5 — using it as a table key throws an error. issecretvalue()
+-- lets us check first and skip protected IDs safely. Non-secret Sated debuff
+-- IDs remain readable and are applied at the same instant as the lust buff.
+--
+-- Only fires on updateInfo.addedAuras (delta events). isFullUpdate events
+-- (e.g. zoning in while already lusted) are intentionally skipped — the buff
+-- has already been running and the music would be out of sync anyway.
+--
+-- Music stops via a 42-second timer (lust duration + 2s buffer) since we
+-- can't watch for the buff to fall off without the same secret-value problem.
+local LUST_DURATION = 42  -- seconds; all lust variants last 40s base
 
--- Get current haste percentage
-local function GetCurrentHaste()
-    return GetHaste() or 0
+local function IsLust(spellId)
+    if issecretvalue(spellId) then return false end
+    return SATED_DEBUFF_IDS[spellId]
 end
 
--- Cleanup all sound handles
+local function OnPlayerAuraUpdate(updateInfo)
+    if isLusted then return end
+    if not updateInfo or updateInfo.isFullUpdate then return end
+    if not updateInfo.addedAuras or #updateInfo.addedAuras == 0 then return end
+
+    for _, aura in ipairs(updateInfo.addedAuras) do
+        if IsLust(aura.spellId) then
+            isLusted      = true
+            activeDebufID = aura.spellId
+            printDebug("Lust detected via spellId:", aura.spellId)
+            PlayDjLust()
+
+            if lustEndTimer then lustEndTimer:Cancel() end
+            lustEndTimer = C_Timer.NewTimer(LUST_DURATION, function()
+                lustEndTimer  = nil
+                isLusted      = false
+                activeDebufID = nil
+                StopDjLust()
+                printDebug("Lust timer expired - stopping")
+            end)
+            return
+        end
+    end
+end
+
+-- ─── SOUND / ANIMATION ───────────────────────────────────────────────────────
+
 local function CleanupSoundHandles()
     for i = #soundHandlePool, 1, -1 do
         local handle = soundHandlePool[i]
-        if handle then
-            StopSound(handle)
-        end
+        if handle then StopSound(handle) end
         soundHandlePool[i] = nil
     end
-    
-    -- Force table cleanup
     wipe(soundHandlePool)
 end
 
--- Restore CVar only when needed
 local function RestoreChannelVolume()
     if cvarDirty and originalChannelVolume then
-        local channel = DjLustDB.soundChannel or "Dialog"
+        local channel  = DjLustDB.soundChannel or "Dialog"
         local cvarName = CHANNEL_CVARS[channel] or "Sound_DialogVolume"
         SetCVar(cvarName, tostring(originalChannelVolume))
         cvarDirty = false
@@ -164,7 +215,7 @@ function addon:TestMusic()
         return
     end
 
-    local volume  = DjLustDB.volume or 1.0
+    local volume   = DjLustDB.volume or 1.0
     local cvarName = CHANNEL_CVARS[channel] or "Sound_DialogVolume"
     if not originalChannelVolume then
         originalChannelVolume = tonumber(GetCVar(cvarName)) or 1.0
@@ -185,10 +236,8 @@ function addon:TestMusic()
     end
 end
 
-
 -- Play bloodlust music and animation
-local function PlayDjLust()
-    -- DEBOUNCE: Prevent rapid-fire calls
+PlayDjLust = function()
     local now = GetTime()
     if now - lastPlayTime < PLAY_COOLDOWN then
         printDebug("Music play blocked - cooldown active (", string.format("%.1f", PLAY_COOLDOWN - (now - lastPlayTime)), "s remaining)")
@@ -196,29 +245,21 @@ local function PlayDjLust()
     end
     lastPlayTime = now
 
-    -- Stop any currently playing music and cleanup handles
     StopMusic()
     CleanupSoundHandles()
 
-    -- ── ANIMATION ────────────────────────────────────────────────────────────
-    -- Always start animation first, regardless of sound outcome.
     if DjLustDB.animationStyle ~= "none" then
-        if addon.StartAnimation then
-            addon:StartAnimation()
-        end
+        if addon.StartAnimation then addon:StartAnimation() end
     end
 
-    -- ── SOUND ────────────────────────────────────────────────────────────────
-    -- Respect the addon-level mute flag
     if DjLustDB.muteSound then
         printDebug("Sound muted by user preference - animation only")
         return
     end
 
-    local channel = DjLustDB.soundChannel or "Dialog"
+    local channel   = DjLustDB.soundChannel or "Dialog"
     local musicFile = GetMusicFile()
 
-    -- Check whether the WoW sound channel is actually audible
     local isMuted, muteReason = IsChannelEffectivelyMuted(channel)
     if isMuted then
         print(string.format(
@@ -237,12 +278,10 @@ local function PlayDjLust()
     else
         local cvarName = CHANNEL_CVARS[channel] or "Sound_DialogVolume"
 
-        -- Cache original volume for restoration
         if not originalChannelVolume then
             originalChannelVolume = tonumber(GetCVar(cvarName)) or 1.0
         end
 
-        -- Only set CVar if actually different
         local targetVolume = tostring(volume)
         if GetCVar(cvarName) ~= targetVolume then
             SetCVar(cvarName, targetVolume)
@@ -254,7 +293,6 @@ local function PlayDjLust()
             soundHandlePool[1] = soundHandle
             printDebug("Now playing:", musicFile, "on channel:", channel, "at volume", math.floor(volume * 100), "%")
         else
-            -- Music failed but animation is already running – just warn.
             print(string.format(
                 "|cff00bfff[DjLust]|r |cffff8800[!] Failed to load music file.|r "
                 .. "Check the file exists and the |cffff8800%s|r channel isn't muted. "
@@ -266,8 +304,8 @@ local function PlayDjLust()
     end
 end
 
--- Stop bloodlust music (internal: stops both music and animation when lust ends)
-local function StopDjLust()
+-- Stop bloodlust music (stops both music and animation when lust ends)
+StopDjLust = function()
     CleanupSoundHandles()
     RestoreChannelVolume()
     if addon.StopAnimation then addon:StopAnimation() end
@@ -284,7 +322,7 @@ end
 -- Update volume for currently playing music
 function addon:UpdateVolume(volume)
     if soundHandlePool[1] and originalChannelVolume then
-        local channel = DjLustDB.soundChannel or "Dialog"
+        local channel  = DjLustDB.soundChannel or "Dialog"
         local cvarName = CHANNEL_CVARS[channel] or "Sound_DialogVolume"
         SetCVar(cvarName, tostring(volume))
         cvarDirty = true
@@ -295,7 +333,6 @@ end
 -- Change which WoW sound channel music plays on
 function addon:SetSoundChannel(channel)
     if CHANNEL_CVARS[channel] then
-        -- Restore old channel before switching
         RestoreChannelVolume()
         DjLustDB.soundChannel = channel
         printDebug("Sound channel set to:", channel)
@@ -319,9 +356,7 @@ end
 -- Update animation style
 function addon:UpdateTheme(style)
     DjLustDB.animationStyle = style
-    if addon.UpdateAnimationTexture then
-        addon:UpdateAnimationTexture()
-    end
+    if addon.UpdateAnimationTexture then addon:UpdateAnimationTexture() end
 end
 
 -- Update selected music
@@ -329,115 +364,57 @@ function addon:UpdateMusic(path)
     DjLustDB.music = path
 end
 
--- Check for sudden haste increase
-local function CheckHasteForBloodlust()
-    if bloodlustCooldown > 0 then
-        bloodlustCooldown = bloodlustCooldown - CHECK_INTERVAL
-        return isLusted
-    end
-    
-    local currentHaste = GetCurrentHaste()
-    
-    if not baselineHaste then
-        baselineHaste = currentHaste
-        return false
-    end
-    
-    -- Use configured threshold (convert from % to decimal)
-    local hasteThreshold = (DjLustDB.hasteThreshold or 25) / 100
-    local hasteIncrease = (currentHaste - baselineHaste) / 100
-    
-    if hasteIncrease >= hasteThreshold and not isLusted then
-        isLusted = true
-        bloodlustCooldown = BLOODLUST_COOLDOWN
-        PlayDjLust()
-        return true
-    end
-    
-    if hasteIncrease < (hasteThreshold / 2) and isLusted then
-        isLusted = false
-        baselineHaste = currentHaste
-        bloodlustCooldown = 0
-        StopDjLust()
-        return false
-    end
-    
-    return isLusted
-end
-
--- Start haste monitoring (combat only)
-local function StartHasteMonitoring()
-    if hasteCheckTimer then
-        hasteCheckTimer:Cancel()
-        hasteCheckTimer = nil
-    end
-
-    hasteCheckTimer = C_Timer.NewTicker(CHECK_INTERVAL, CheckHasteForBloodlust)
-end
-
--- Stop haste monitoring
-local function StopHasteMonitoring()
-    if hasteCheckTimer then
-        hasteCheckTimer:Cancel()
-        hasteCheckTimer = nil
-    end
-end
-
--- COMPREHENSIVE CLEANUP 
+-- ─── COMPREHENSIVE CLEANUP ───────────────────────────────────────────────────
 local function Cleanup()
     printDebug("Running comprehensive cleanup...")
-    
-    -- Stop monitoring
-    StopHasteMonitoring()
-    
-    -- Stop music and sounds
+    if lustEndTimer then lustEndTimer:Cancel() ; lustEndTimer = nil end
     StopDjLust()
-    
-    -- Reset state
-    isLusted = false
-    baselineHaste = nil
-    bloodlustCooldown = 0
-    lastPlayTime = 0
-    
-    -- Force garbage collection (aggressive)
+    isLusted      = false
+    activeDebufID = nil
+    lastPlayTime  = 0
     collectgarbage("collect")
-    
-    -- Second pass after short delay
     C_Timer.After(0.1, function()
         collectgarbage("collect")
         printDebug("Garbage collection complete")
     end)
 end
 
--- Event handler
-frame:RegisterEvent("PLAYER_ENTERING_WORLD")
-frame:RegisterEvent("PLAYER_REGEN_DISABLED")
-frame:RegisterEvent("PLAYER_REGEN_ENABLED")
+-- ─── EVENT REGISTRATION ──────────────────────────────────────────────────────
+frame:RegisterEvent("LOADING_SCREEN_DISABLED")
+frame:RegisterEvent("PLAYER_DEAD")
 frame:RegisterEvent("PLAYER_LOGOUT")
+
 frame:SetScript("OnEvent", function(self, event, ...)
-    if event == "PLAYER_ENTERING_WORLD" then
+    if event == "LOADING_SCREEN_DISABLED" then
         printDebug("DjLust loaded - Style:", DjLustDB.animationStyle or "chipi")
-        baselineHaste = GetCurrentHaste()
-        -- No ticker on load - will start when combat begins
-    elseif event == "PLAYER_REGEN_DISABLED" then
-        -- Entering combat: snapshot baseline and start polling
-        baselineHaste = GetCurrentHaste()
-        StartHasteMonitoring()
-    elseif event == "PLAYER_REGEN_ENABLED" then
-        -- Leaving combat: stop polling immediately (0 CPU while idle)
-        StopHasteMonitoring()
-        if isLusted then
-            isLusted = false
-            StopDjLust()
+        -- Mirror BudgetPedro: only register UNIT_AURA in raid/party instances.
+        -- This avoids unnecessary aura processing in the open world.
+        local _, instanceType = GetInstanceInfo()
+        if instanceType == "raid" or instanceType == "party" then
+            self:RegisterUnitEvent("UNIT_AURA", "player")
+            printDebug("UNIT_AURA registered (instanceType:", instanceType, ")")
+        else
+            self:UnregisterEvent("UNIT_AURA")
+            printDebug("UNIT_AURA not registered (instanceType:", instanceType, ")")
         end
-        baselineHaste = GetCurrentHaste()
-        bloodlustCooldown = 0
+
+    elseif event == "UNIT_AURA" then
+        local _, updateInfo = ...
+        OnPlayerAuraUpdate(updateInfo)
+
+    elseif event == "PLAYER_DEAD" then
+        -- Stop music if the player dies mid-lust
+        if lustEndTimer then lustEndTimer:Cancel() ; lustEndTimer = nil end
+        isLusted      = false
+        activeDebufID = nil
+        StopDjLust()
+
     elseif event == "PLAYER_LOGOUT" then
         Cleanup()
     end
 end)
 
--- Slash commands
+-- ─── SLASH COMMANDS ──────────────────────────────────────────────────────────
 SLASH_DJLUST1 = "/djl"
 SLASH_DJLUST2 = "/djlust"
 SlashCmdList["DJLUST"] = function(msg)
@@ -445,38 +422,44 @@ SlashCmdList["DJLUST"] = function(msg)
         local style = DjLustDB.animationStyle or "chipi"
         print("[DjLust] [TEST] Testing playback (style: " .. style .. ")")
         PlayDjLust()
+
     elseif msg == "stop" then
         print("[DjLust] [STOP] Stopping music...")
         addon:StopMusic()
-        isLusted = false
-        bloodlustCooldown = 0
+        if lustEndTimer then lustEndTimer:Cancel() ; lustEndTimer = nil end
+        isLusted      = false
+        activeDebufID = nil
+
     elseif msg == "status" then
-        print("[DjLust] [STATUS]:")
-        print("  Bloodlusted:", isLusted and "YES" or "NO")
+        print("|cff00bfff[DjLust]|r [STATUS]:")
+        print("  Bloodlusted:", isLusted and "|cff00ff00YES|r" or "|cffff0000NO|r")
+        if activeDebufID then
+            print("  Triggered by:", SATED_DEBUFF_IDS[activeDebufID] or "Unknown", "(ID: " .. activeDebufID .. ")")
+        end
         print("  In combat:", InCombatLockdown() and "YES" or "NO")
-        print(string.format("  Baseline haste: %.1f%%", baselineHaste or 0))
-        print(string.format("  Current haste: %.1f%%", GetCurrentHaste()))
-        local diff = baselineHaste and (GetCurrentHaste() - baselineHaste) or 0
-        print(string.format("  Haste difference: %.1f%%", diff))
-        print(string.format("  Cooldown remaining: %.1fs", bloodlustCooldown))
-        print("  Ticker active:", hasteCheckTimer and "YES" or "NO")
+        print("  Music timer active:", lustEndTimer and "|cff00ff00YES|r" or "NO")
         print("  Sound handles active:", #soundHandlePool)
         print("  Last play:", string.format("%.1fs ago", GetTime() - lastPlayTime))
+        print("  Detection method: Sated-type HARMFUL debuff via UNIT_AURA")
+        print("  Tracking", (function() local n=0 for _ in pairs(SATED_DEBUFF_IDS) do n=n+1 end return n end)(), "debuff IDs")
+
     elseif msg == "reset" then
-        print("[DjLust] [RESET] Resetting detection...")
-        baselineHaste = GetCurrentHaste()
-        isLusted = false
-        bloodlustCooldown = 0
+        print("[DjLust] [RESET] Resetting detection state...")
+        if lustEndTimer then lustEndTimer:Cancel() ; lustEndTimer = nil end
+        isLusted      = false
+        activeDebufID = nil
         StopDjLust()
+        print("|cff00bfff[DjLust]|r Detection reset. Watching for Sated-type debuffs.")
+
     elseif msg == "config" then
-        print("[DjLust] [CONFIG]\nConfiguration:")
+        print("|cff00bfff[DjLust]|r [CONFIG]\nConfiguration:")
         print("  Animation style:", DjLustDB.animationStyle or "chipi")
         print("  Music:", (DjLustDB.music ~= "") and DjLustDB.music or "(default: chipilust.mp3)")
         print("  Volume:", math.floor(DjLustDB.volume * 100) .. "%")
-        print("  Haste threshold:", (DjLustDB.hasteThreshold or 25) .. "%")
-        print("  Check interval:", CHECK_INTERVAL .. "s")
+        print("  Detection: issecretvalue() guard on UNIT_AURA addedAuras (BudgetPedro method)")
         print("  Animation locked:", DjLustDB.animationLocked and "YES" or "NO")
         print("\nTo change settings, use /djlust settings")
+
     elseif msg:match("^debug") then
         local arg = msg:match("^debug%s*(%S*)")
         if arg == "on" then
@@ -488,34 +471,34 @@ SlashCmdList["DJLUST"] = function(msg)
             print("  /djlust debug on  - Enable debug output")
             print("  /djlust debug off - Disable debug output")
         end
+
     elseif msg:match("^volume") then
         local vol = tonumber(msg:match("^volume%s+(%d+)"))
         if vol and vol >= 0 and vol <= 100 then
             DjLustDB.volume = vol / 100
-            if addon.UpdateVolume then
-                addon:UpdateVolume(DjLustDB.volume)
-            end
+            if addon.UpdateVolume then addon:UpdateVolume(DjLustDB.volume) end
             print(string.format("|cff00bfff[DjLust]|r Volume set to %d%%", vol))
         else
             print("|cff00bfff[DjLust]|r Usage: /djlust volume <0-100>")
             print(string.format("  Current volume: %d%%", math.floor((DjLustDB.volume or 1.0) * 100)))
         end
+
     elseif msg == "cleanup" then
         Cleanup()
         print("|cff00bfff[DjLust]|r Cleanup complete - all resources freed")
+
     elseif msg == "mem" then
-        -- Memory diagnostic
         UpdateAddOnMemoryUsage()
         local mem = GetAddOnMemoryUsage("DjLust")
         print(string.format("|cff00bfff[DjLust]|r Memory usage: %.2f KB", mem))
         print("  Sound handles:", #soundHandlePool)
-        print("  Ticker active:", hasteCheckTimer and "YES" or "NO")
+
     else
         print("|cff00bfff[DjLust] [HELP]\nAvailable Commands:|r")
-        print("  |cffff8800/djlust status|r - Show current status")
+        print("  |cffff8800/djlust status|r - Show current status and active auras")
         print("  |cffff8800/djlust test|r - Test music playback")
         print("  |cffff8800/djlust stop|r - Stop music")
-        print("  |cffff8800/djlust reset|r - Reset detection")
+        print("  |cffff8800/djlust reset|r - Reset detection state")
         print("  |cffff8800/djlust config|r - Show configuration")
         print("  |cffff8800/djlust volume <0-100>|r - Set music volume")
         print("  |cffff8800/djlust debug on/off|r - Toggle debug output")

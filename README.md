@@ -1,42 +1,63 @@
-# DjLust 
-A Simple WoW Addon to Play music and display an animation during Bloodlust and other similar spells.
+# DjLust
+A Simple WoW Addon to play music and display an animation during Bloodlust and other similar spells.
 
-**Combat 'state' tracked using players relative haste percentage by sampling every 0.3 seconds.**
+**Detection method: `issecretvalue()` guard on `UNIT_AURA` `addedAuras` — compatible with WoW 12.0.5+.**
 
-## Usage:
-- Click the new bloodlust icon on your minimap to bring up settings menu OR use the following commands
-- `/djlust` - Prints available commands to the chat. 
-- `/djlust settings` - Open Settings Menu
-<sub> `/djl` available alias for `/djlust` </sub>
+## Usage
+- Click the bloodlust icon on your minimap to open the settings menu, or use the slash commands below.
 
-## Features:
-- Choose Between 2 Default Music Clips
-- Choose Between 2 Animations OR Optionally Configure Custom Text to display
-- Dont like sound? Select `none` under Music and only see the Animation.
-- Dont like seeing anything on screen? Hide the Animation and only hear the Sound track.
+## Features
+- Choose between 2 default music clips or provide a custom file path
+- Choose between 2 animations, or configure custom text to display
+- Don't like sound? Select `none` under Music to show the animation only
+- Don't like seeing anything on screen? Disable the animation and hear only the soundtrack
 
-**Commands:**
-- `/djlust`                - Show All available commands
-- `/djlust settings`       - Open settings window
-- `/djlust test`           - Test music & animation
-- `/djlust stop`           - Stop music & animation
-- `/djlust status`         - Shows current combat status and haste metrics.
-- `/djlust reset`          - Manually reset haste baseline (automatically happens leaving/joining combat)
-- `/djlust volume <0-100>` - Set volume (`/djlust volume 80` - set volume to 80%)
-- `/djlust minimap`        - Toggle Minimap button on/off.
-- `/djlust <lock|unlock>`  - Lock/Unlock Animation position.
+## Commands
+| Command | Description |
+|---|---|
+| `/djlust` | Show all available commands |
+| `/djlust settings` | Open settings window |
+| `/djlust test` | Test music & animation |
+| `/djlust stop` | Stop music & animation |
+| `/djlust status` | Show current detection state |
+| `/djlust reset` | Reset detection state |
+| `/djlust volume <0-100>` | Set volume (e.g. `/djlust volume 80`) |
+| `/djlust minimap` | Toggle minimap button |
+| `/djlust lock` / `/djlust unlock` | Lock/unlock animation position |
+| `/djlust debug on/off` | Toggle debug output |
 
-<sub> [TIP] use `/djl` as alias for `/djlust` </sub>
-
+> `/djl` is available as an alias for `/djlust`
 
 ---
 
-**Known Limitations:**
+## How Detection Works (12.0.5+)
 
-- not exclusively checking bloodlust. <sub> we are only checking if our haste went up by 25% (can be manually configured in settings) in last 0.3 seconds. therefore spells like pres evoker tip of scales will trigger the music. This can be tweaked in djlust settings menu </sub>
-- Droping Comabat and Rejoining Combat while lust is active will not restart the animation/music from displaying.
-- Does **NOT** work outside of combat. 
-- No localization framework (planned on or before v1.5.0)
+WoW 12.0.5 made `GetHaste()` return a secret (unreadable) value when called from addon code.
+Earlier attempts to read `aura.spellId` from `C_UnitAuras` also hit secret-value protection.
 
+1. Listen to `UNIT_AURA` via `RegisterUnitEvent("UNIT_AURA", "player")` (registered only in raid/party)
+2. On each event, iterate `updateInfo.addedAuras`
+3. For each aura, call `issecretvalue(aura.spellId)` — if true, skip it safely
+4. If the spellId is a known Sated-type debuff, trigger music + animation
 
-<sub> Inspired by Pedro Lust Weakaura ❤️ </sub>
+**Tracked debuff IDs:**
+| Debuff | ID | Source |
+|---|---|---|
+| Sated | 57724 | Bloodlust (Shaman) |
+| Exhaustion | 57723 | Heroism / Fury of the Aspects / Primal Rage |
+| Temporal Displacement | 80354 | Time Warp (Mage) |
+| Insanity | 95809 | Ancient Hysteria (Hunter Core Hound pet) |
+| Fatigued | 160455 | Drums of the Maelstrom |
+| Fatigued | 264689 | Hunter pet variant |
+| Exhaustion | 390435 | Additional variant |
+
+Music stops automatically after 42 seconds (lust duration is 40s across all variants).
+
+---
+
+## Known Limitations
+- Only active in raid and party instances (not open world)
+- Zoning in while already lusted will not trigger the animation (the `isFullUpdate` path is intentionally skipped as the buff is already mid-duration)
+- No localization framework (planned for v1.5.0)
+
+<sub>Inspired by Pedro Lust Weakaura ❤️</sub>

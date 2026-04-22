@@ -40,7 +40,6 @@ local function EnsureDBDefaults()
     DjLustDB.soundChannel   = DjLustDB.soundChannel   or "Dialog"
     DjLustDB.muteSound      = DjLustDB.muteSound      or false
     DjLustDB.savedSongs     = DjLustDB.savedSongs     or {}
-    DjLustDB.hasteThreshold = DjLustDB.hasteThreshold or 25
     DjLustDB.debugMode      = DjLustDB.debugMode      or false
     if DjLustDB.animationLocked == nil then DjLustDB.animationLocked = false end
     if not DjLustDB.minimap      then DjLustDB.minimap = {} end
@@ -79,10 +78,6 @@ local function UpdateUIValues(f)
         for ch, btn in pairs(ui.channelRadios) do
             btn:SetChecked(DjLustDB.soundChannel == ch)
         end
-    end
-    if ui.hasteSlider and ui.hasteLabel then
-        ui.hasteSlider:SetValue(DjLustDB.hasteThreshold)
-        ui.hasteLabel:SetText("Haste Threshold: " .. DjLustDB.hasteThreshold .. "%")
     end
     if ui.minimapCheck then ui.minimapCheck:SetChecked(not DjLustDB.minimap.hide) end
     if ui.debugCheck   then ui.debugCheck:SetChecked(DjLustDB.debugMode)          end
@@ -620,25 +615,17 @@ local function CreateSettingsWindow()
     -- ── SECTION: DETECTION ─────────────────────────────────────────────────
     Header("Detection")
 
-    local hasteLabel = Label("Haste Threshold: " .. DjLustDB.hasteThreshold .. "%")
-    y = y - 18
-    local hasteHelp = content:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
-    hasteHelp:SetPoint("TOPLEFT", 25, y)
-    hasteHelp:SetText("|cff606060Minimum haste spike required to trigger (default 25%)|r")
-    y = y - 24
-    local hasteSlider = CreateFrame("Slider", nil, content, "OptionsSliderTemplate")
-    hasteSlider:SetPoint("TOPLEFT", 25, y)
-    hasteSlider:SetWidth(380) ; hasteSlider:SetMinMaxValues(10, 50)
-    hasteSlider:SetValue(DjLustDB.hasteThreshold) ; hasteSlider:SetValueStep(1)
-    hasteSlider:SetObeyStepOnDrag(true)
-    hasteSlider.Low:SetText("10%") ; hasteSlider.High:SetText("50%")
-    hasteSlider:SetScript("OnValueChanged", function(self, v)
-        DjLustDB.hasteThreshold = v
-        hasteLabel:SetText("Haste Threshold: " .. v .. "%")
-    end)
-    f.uiElements.hasteSlider = hasteSlider
-    f.uiElements.hasteLabel  = hasteLabel
-    y = y - 36
+    local detInfo = content:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
+    detInfo:SetPoint("TOPLEFT", 25, y)
+    detInfo:SetWidth(400)
+    detInfo:SetJustifyH("LEFT")
+    detInfo:SetText(
+        "|cff00ff00issecretvalue() detection active (12.0.5 compatible).|r\n"
+        .. "|cff606060Fires on UNIT_AURA addedAuras. Uses issecretvalue() to safely\n"
+        .. "skip protected spellIds. Tracks Sated, Exhaustion, Temporal Displacement,\n"
+        .. "Insanity, Fatigued and two additional variant IDs. Active in raid/party only.|r"
+    )
+    y = y - 72
 
     Sep()
 
@@ -797,7 +784,7 @@ local function RegisterOptionsPanel()
     Fs("GameFontNormalLarge", "|cff00bfffDjLust|r")
     Skip(22)
     Fs("GameFontHighlightSmall",
-       "Plays music and animation when Bloodlust / Heroism is detected via haste spike.")
+       "Plays music and animation when Bloodlust / Heroism is detected via aura events.")
     Skip(14) ; Div() ; Skip(4) ; Skip(12)
 
     local check = CreateFrame("CheckButton", "DjLustOptionsMinimapCheck", panel,
@@ -840,7 +827,7 @@ local function RegisterOptionsPanel()
         { "/djlust test",           "Test music and animation"                },
         { "/djlust stop",           "Stop music and animation"                },
         { "/djlust status",         "Show detection status"                   },
-        { "/djlust reset",          "Reset haste baseline"                    },
+        { "/djlust reset",          "Reset detection state"                   },
         { "/djlust volume <0-100>", "Set volume (e.g. /djlust volume 80)"     },
         { "/djlust minimap",        "Toggle minimap button"                   },
         { "/djlanim lock",          "Lock animation position"                 },
