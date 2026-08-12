@@ -1,14 +1,16 @@
 -- DjLust: Production version with music!
 -- Detects Bloodlust (and similar spells) via aura detection and plays music
 -- v1.2.0: Detection via issecretvalue() guard on UNIT_AURA addedAuras (ported from BudgetPedro)
+-- v1.3.0: 12.1.0 fix — UNIT_AURA payload is now fully secret while auras are
+--         secret, so detection moved to spell-ID polling via
+--         C_UnitAuras.GetPlayerAuraBySpellID (spell-ID lookups are explicitly
+--         still allowed in 12.1; non-secret spells return non-secrets).
 
 local addonName, addon = ...
 
--- Sated-type debuff IDs. In 12.0.5 aura spellIds may be secret values that
--- cannot be used as table keys. BudgetPedro's solution: read aura.spellId
--- normally but skip it with issecretvalue() if it is protected. Non-secret
--- Sated debuff IDs are still readable and fire at the exact same instant as
--- the lust buff itself.
+-- Sated-type debuff IDs. In 12.1 the UNIT_AURA payload is fully secret, but
+-- these debuffs are non-secret auras and remain directly queryable by spell
+-- ID. They are applied at the exact same instant as the lust buff itself.
 local SATED_DEBUFF_IDS = {
     [57723]  = true, -- Exhaustion           (Heroism / Fury of the Aspects / Primal Rage)
     [57724]  = true, -- Sated                (Bloodlust)
@@ -126,48 +128,83 @@ local function SetDebug(enabled)
         enabled and "|cff00ff00ENABLED|r" or "|cffff0000DISABLED|r"))
 end
 
--- ─── LUST DETECTION ──────────────────────────────────────────────────────────
--- Ported from BudgetPedro (MIT). Key insight: aura.spellId may be a secret
--- value in 12.0.5 — using it as a table key throws an error. issecretvalue()
--- lets us check first and skip protected IDs safely. Non-secret Sated debuff
--- IDs remain readable and are applied at the same instant as the lust buff.
+-- ─── LUST DETECTION (12.1.0) ─────────────────────────────────────────────────
+-- 12.1.0 broke payload-based detection: UNIT_AURA now delivers a fully secret
+-- payload while auras are secret (combat, encounters, M+, PvP), and AuraData
+-- structs in the payload are always fully secret. Reading updateInfo fields,
+-- taking #updateInfo.addedAuras, or iterating it now errors — the old
+-- issecretvalue()-per-spellId guard is useless because the WHOLE struct is
+-- secret, not individual fields.
 --
--- Only fires on updateInfo.addedAuras (delta events). isFullUpdate events
--- (e.g. zoning in while already lusted) are intentionally skipped — the buff
--- has already been running and the music would be out of sync anyway.
+-- What still works: C_UnitAuras lookups by spell ID or spell name. Per the
+-- 12.1 notes these "can still be called by addons as before (non-secret
+-- spells still return non-secrets)". The Sated-type debuffs are non-secret
+-- (their classification is unchanged from 12.0.5 — the only auras
+-- re-classified in 12.1 were healer HoTs), so we use UNIT_AURA purely as a
+-- "something changed on the player" signal and poll our known IDs directly.
 --
--- Music stops via a 42-second timer (lust duration + 2s buffer) since we
--- can't watch for the buff to fall off without the same secret-value problem.
+-- Freshness check: the Sated debuff outlives the lust itself (minutes vs
+-- 40s), so presence alone would retrigger on every aura update for the whole
+-- debuff duration. Instead we compute the debuff's age from its own
+-- duration/expirationTime and only fire when it was applied within the last
+-- FRESH_WINDOW seconds. This replaces both the old addedAuras delta logic
+-- and the isFullUpdate skip: zoning in or /reload mid-debuff yields an old
+-- debuff, which is correctly ignored. Music still stops on a 42s timer since
+-- the debuff can't tell us when the lust buff itself falls off.
 local LUST_DURATION = 42  -- seconds; all lust variants last 40s base
+local FRESH_WINDOW  = 2   -- seconds; max debuff age to count as a fresh lust
 
-local function IsLust(spellId)
-    if issecretvalue(spellId) then return false end
-    return SATED_DEBUFF_IDS[spellId]
+-- Secret-value guard. issecretvalue covers scalar secrets; issecrettable and
+-- canaccessvalue exist in some builds for tables/access checks. All are
+-- guarded so this is safe on any client version.
+local function IsSecret(value)
+    if issecretvalue and issecretvalue(value) then return true end
+    if issecrettable and issecrettable(value) then return true end
+    if canaccessvalue and not canaccessvalue(value) then return true end
+    return false
 end
 
-local function OnPlayerAuraUpdate(updateInfo)
-    if isLusted then return end
-    if not updateInfo or updateInfo.isFullUpdate then return end
-    if not updateInfo.addedAuras or #updateInfo.addedAuras == 0 then return end
-
-    for _, aura in ipairs(updateInfo.addedAuras) do
-        if IsLust(aura.spellId) then
-            isLusted      = true
-            activeDebufID = aura.spellId
-            printDebug("Lust detected via spellId:", aura.spellId)
-            PlayDjLust()
-
-            if lustEndTimer then lustEndTimer:Cancel() end
-            lustEndTimer = C_Timer.NewTimer(LUST_DURATION, function()
-                lustEndTimer  = nil
-                isLusted      = false
-                activeDebufID = nil
-                StopDjLust()
-                printDebug("Lust timer expired - stopping")
-            end)
-            return
+-- Returns the spellId of a freshly-applied Sated-type debuff, or nil.
+local function GetFreshSatedDebuff()
+    for spellId in pairs(SATED_DEBUFF_IDS) do
+        -- pcall: spell-ID lookups are explicitly still allowed in 12.1, but if
+        -- Blizzard ever re-flags these debuffs the call must degrade silently
+        -- instead of erroring on every UNIT_AURA.
+        local ok, aura = pcall(C_UnitAuras.GetPlayerAuraBySpellID, spellId)
+        -- IsSecret first: never compare a possibly-secret value to nil.
+        if ok and not IsSecret(aura) and aura ~= nil
+           and not IsSecret(aura.expirationTime) and not IsSecret(aura.duration) then
+            local appliedAt = aura.expirationTime - aura.duration
+            -- appliedAt > 0 filters out durationless auras (expirationTime == 0)
+            if appliedAt > 0 and (GetTime() - appliedAt) <= FRESH_WINDOW then
+                return spellId
+            end
         end
     end
+    return nil
+end
+
+-- UNIT_AURA handler. The updateInfo payload is fully secret in 12.1 — it is
+-- not even passed in here. The event is only a trigger to re-poll.
+local function OnPlayerAuraUpdate()
+    if isLusted then return end
+
+    local spellId = GetFreshSatedDebuff()
+    if not spellId then return end
+
+    isLusted      = true
+    activeDebufID = spellId
+    printDebug("Lust detected via spellId:", spellId)
+    PlayDjLust()
+
+    if lustEndTimer then lustEndTimer:Cancel() end
+    lustEndTimer = C_Timer.NewTimer(LUST_DURATION, function()
+        lustEndTimer  = nil
+        isLusted      = false
+        activeDebufID = nil
+        StopDjLust()
+        printDebug("Lust timer expired - stopping")
+    end)
 end
 
 -- ─── SOUND / ANIMATION ───────────────────────────────────────────────────────
@@ -387,7 +424,7 @@ frame:RegisterEvent("PLAYER_LOGOUT")
 frame:SetScript("OnEvent", function(self, event, ...)
     if event == "LOADING_SCREEN_DISABLED" then
         printDebug("DjLust loaded - Style:", DjLustDB.animationStyle or "chipi")
-        -- Mirror BudgetPedro: only register UNIT_AURA in raid/party instances.
+        -- Only register UNIT_AURA in raid/party instances.
         -- This avoids unnecessary aura processing in the open world.
         local _, instanceType = GetInstanceInfo()
         if instanceType == "raid" or instanceType == "party" then
@@ -399,8 +436,9 @@ frame:SetScript("OnEvent", function(self, event, ...)
         end
 
     elseif event == "UNIT_AURA" then
-        local _, updateInfo = ...
-        OnPlayerAuraUpdate(updateInfo)
+        -- 12.1.0: the updateInfo payload is fully secret while auras are
+        -- secret. Do NOT read it — the event is only a re-poll trigger.
+        OnPlayerAuraUpdate()
 
     elseif event == "PLAYER_DEAD" then
         -- Stop music if the player dies mid-lust
@@ -440,7 +478,7 @@ SlashCmdList["DJLUST"] = function(msg)
         print("  Music timer active:", lustEndTimer and "|cff00ff00YES|r" or "NO")
         print("  Sound handles active:", #soundHandlePool)
         print("  Last play:", string.format("%.1fs ago", GetTime() - lastPlayTime))
-        print("  Detection method: Sated-type HARMFUL debuff via UNIT_AURA")
+        print("  Detection method: spell-ID polling of Sated debuffs on UNIT_AURA (12.1)")
         print("  Tracking", (function() local n=0 for _ in pairs(SATED_DEBUFF_IDS) do n=n+1 end return n end)(), "debuff IDs")
 
     elseif msg == "reset" then
@@ -456,7 +494,7 @@ SlashCmdList["DJLUST"] = function(msg)
         print("  Animation style:", DjLustDB.animationStyle or "chipi")
         print("  Music:", (DjLustDB.music ~= "") and DjLustDB.music or "(default: chipilust.mp3)")
         print("  Volume:", math.floor(DjLustDB.volume * 100) .. "%")
-        print("  Detection: issecretvalue() guard on UNIT_AURA addedAuras (BudgetPedro method)")
+        print("  Detection: C_UnitAuras.GetPlayerAuraBySpellID polling on UNIT_AURA (12.1 secret-payload safe)")
         print("  Animation locked:", DjLustDB.animationLocked and "YES" or "NO")
         print("\nTo change settings, use /djlust settings")
 
